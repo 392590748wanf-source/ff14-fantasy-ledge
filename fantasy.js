@@ -102,6 +102,14 @@ window.addEventListener('load', () => {
   ];
   const baseMaterials = window.FF14_BASE_MATERIALS || { n: {}, b: {}, d: {}, k: {}, meta: {} };
   const submarineData = window.FF14_SUBMARINE_DATA || { parts: [], g: {}, n: {}, leaves: [] };
+  // 改级潜水艇的“骨架”只是在工房配方中承接旧部件的内部节点，
+  // 不是真实的市场板物品，不能向 Universalis 查询价格。
+  const submarineSkeletonNodeIds = new Set([
+    '26508', '26509', '26510', '26511', '26512', '26513', '26514', '26515',
+    '26516', '26517', '26518', '26519', '26520', '26521', '26522', '26523',
+    '26524', '26525', '26526', '26527'
+  ]);
+  const isNonMarketSubmarineNode = materialOrUid => submarineSkeletonNodeIds.has(String(typeof materialOrUid === 'object' ? materialOrUid?.uid : materialOrUid));
   const retainerData = window.FF14_RETAINER_DATA || {};
   const materialSources = window.FF14_MATERIAL_SOURCES || {};
   const exchangeSources = window.FF14_EXCHANGE_SOURCES || { carriers: {}, routes: [] };
@@ -142,9 +150,13 @@ window.addEventListener('load', () => {
   ensureBaseMaterials();
   const ensureSubmarineMaterials = () => Object.entries(submarineData.n || {}).forEach(([uid, name]) => {
     const fixed = npcMaterial(uid), material = data.m.find(item => String(item.uid) === String(uid));
-    if (!material) data.m.push({ id: 'submarine-' + uid, n: name, uid: String(uid), c: fixed?.price || 0, mp: 0, u: '', fixedNpcPrice: fixed?.price, npcSource: fixed?.source });
+    if (!material) data.m.push({ id: 'submarine-' + uid, n: name, uid: String(uid), c: fixed?.price || 0, mp: 0, u: '', fixedNpcPrice: fixed?.price, npcSource: fixed?.source, marketExcluded: isNonMarketSubmarineNode(uid) });
     else if (fixed) { material.fixedNpcPrice = fixed.price; material.npcSource = fixed.source; material.c = fixed.price; }
     else { delete material.fixedNpcPrice; delete material.npcSource; }
+    if (isNonMarketSubmarineNode(uid)) {
+      material && (material.marketExcluded = true);
+      if (material) { material.mp = 0; material.u = ''; delete material.marketStatus; }
+    }
   });
   ensureSubmarineMaterials();
   const ensureExchangeMaterials = () => Object.entries(exchangeSources.carriers || {}).forEach(([uid, spec]) => {
@@ -905,7 +917,7 @@ window.addEventListener('load', () => {
   };
   async function refreshMarket(manual = false, requestedMaterials = null) {
     // NPC 材料也保留市场快照，才能在来源比价中与市场采购公平比较。
-    const materials = (requestedMaterials || data.m).filter(material => material?.uid && !material.exchangeTicket);
+    const materials = (requestedMaterials || data.m).filter(material => material?.uid && !material.exchangeTicket && !isNonMarketSubmarineNode(material));
     if (!materials.length) return;
     if (window.materialRefreshRunning) return;
     window.materialRefreshRunning = true;
