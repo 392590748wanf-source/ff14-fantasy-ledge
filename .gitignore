@@ -1,0 +1,14 @@
+# 用户导出的本地账本备份：不得提交到公开仓库
+ff14-fantasy-backup*.json
+*账本备份*.json
+
+# 本机密钥与部署配置
+.env
+.env.*
+!.env.example
+.wrangler/
+
+# 本机与依赖文件
+node_modules/
+.DS_Store
+Thumbs.db

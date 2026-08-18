@@ -1,0 +1,73 @@
+window.FF14_MATERIAL_SOURCES = {
+  // 来源数据只定义分类；是否进入推荐材料，由对应业务的递归配方图决定。
+  '5058': { name: '白钢锭', npc: { price: 258, source: '蜥蜴蛮族购买', force: true } },
+  '5065': { name: '秘银锭', npc: { price: 514, source: '蜥蜴人族杂用商人' } },
+  '5092': { name: '黑铁铆钉', npc: { price: 73, source: '蜥蜴蛮族或各类商店购买', force: true } },
+  '5093': { name: '白钢铆钉', npc: { price: 313, source: '蜥蜴蛮族购买', force: true } },
+  '5099': { name: '秘银铆钉', npc: { price: 583, source: '蜥蜴蛮族购买', force: true } },
+  '5106': { name: '铜矿', npc: { price: 2, source: '斯密德海穆尔、斯姆尔维布等素材商人' } },
+  '5111': { name: '铁矿', npc: { price: 18, source: '行会供应商、素材商人' } },
+  '5113': { name: '银矿', submarineKinds: ['薰衣草/风茄兑换'] },
+  '5116': { name: '钴铁矿', submarineKinds: ['薰衣草/风茄兑换'] },
+  '5118': { name: '金矿', submarineKinds: ['薰衣草/风茄兑换'] },
+  '5120': { name: '白金矿', submarineKinds: ['限时采集品'] },
+  '5121': { name: '玄铁矿', submarineKinds: ['限时采集品', '薰衣草/风茄兑换'] },
+  '5395': { name: '云杉原木', submarineKinds: ['限时采集品'] },
+  '5263': { name: '石蜥蜴的蛋', submarineKinds: ['怪物掉落'] },
+  '5314': { name: '圣蜥蜴的粗皮', submarineKinds: ['怪物掉落'] },
+  '5436': { name: '山羊角', submarineKinds: ['怪物掉落'] },
+  '5501': { name: '灰汁', submarineKinds: ['军票兑换'] },
+  '5512': { name: '玻璃板', npc: { price: 53, source: '住宅区素材商人购买', force: true } },
+  '5518': { name: '岩盐', npc: { price: 3, source: '乔西、艾丝米奈特等素材商人' } },
+  '5526': { name: '榴弹怪的灰', submarineKinds: ['怪物掉落'], npc: { price: 216, source: '乔·兰玛雅' } },
+  '5528': { name: '爆弹怪的灰', submarineKinds: ['军票兑换', '怪物掉落'] },
+  '5530': { name: '焦炭', submarineKinds: ['军票兑换'] },
+  '5532': { name: '树汁块', submarineKinds: ['军票兑换'] },
+  '5553': { name: '冥鬼的翅膀', submarineKinds: ['怪物掉落'] },
+  '5558': { name: '软糊怪的肉', submarineKinds: ['军票兑换', '怪物掉落'] },
+  '5728': { name: '松节油', npc: { price: 60, source: '阿拉里克、杂货商等' } },
+  '7596': { name: '硅化木', submarineKinds: ['军票兑换'] },
+  '7597': { name: '白钨矿', submarineKinds: ['军票兑换'] },
+  '7598': { name: '拉吉克灵砂', submarineKinds: ['军票兑换'] },
+  '7601': { name: '金刚砂', submarineKinds: ['军票兑换'] },
+  '9369': { name: '拉吉克灵药', submarineKinds: ['军票兑换'] },
+  '5371': { name: '胡桃木材', npc: { price: 219, source: '鸟人蛮族购买', force: true } },
+  '12518': { name: '灵银块', submarineKinds: ['天穹票兑换'] },
+  '12520': { name: '硬银块', submarineKinds: ['天穹票兑换'] },
+  '12522': { name: '皇金块', submarineKinds: ['薰衣草/风茄兑换', '天穹票兑换'] },
+  '12524': { name: '白钛块', npc: { price: 2692, source: '素材商人购买' }, submarineKinds: ['薰衣草/风茄兑换', '天穹票兑换'] },
+  '12526': { name: '精金块', submarineKinds: ['薰衣草/风茄兑换', '天穹票兑换'] },
+  '12532': { name: '硬银沙', npc: { price: 807, source: '贪吃的莫古姆力' } },
+  '12533': { name: '皇金沙', npc: { price: 879, source: '贪吃的莫古姆力' } },
+  '12569': { name: '飞龙的粗皮', submarineKinds: ['怪物掉落'] },
+  '12571': { name: '巨龙的粗皮', submarineKinds: ['怪物掉落'] },
+  '12604': { name: '圣水', submarineKinds: ['天穹票兑换'] },
+  '12609': { name: '熊脂', submarineKinds: ['怪物掉落'] },
+  '12629': { name: '长颈驼的唾液', submarineKinds: ['怪物掉落'] },
+  '12635': { name: '明胶怪的肉', submarineKinds: ['怪物掉落'] },
+  '12636': { name: '双足飞龙的翼膜', submarineKinds: ['怪物掉落'] },
+  '12882': { name: '库尔札斯茶叶', npc: { price: 1485, source: '帕德维莱' } },
+  '12932': { name: '拉吉克硬化触媒', submarineKinds: ['天穹票兑换'] },
+  '12943': { name: '龙堡槲寄生', npc: { price: 1893, source: '帕德维莱、贪吃的莫古姆力' } },
+  '12944': { name: '阿巴拉提亚槲寄生', npc: { price: 3370, source: '帕德维莱' } },
+  '14147': { name: '荒神灵银', submarineKinds: ['天穹票兑换'] },
+  '14150': { name: '荒神合金', submarineKinds: ['天穹票兑换'] },
+  '15649': { name: '玻璃纤维', submarineKinds: ['军票兑换'] },
+  '19999': { name: '迦迦纳怪鸟的粗皮', submarineKinds: ['怪物掉落'] },
+  '25008': { name: '铁纹矿石', submarineKinds: ['潜水艇携带材料'] },
+  '44070': { name: '小鸣鼠的刃爪', equipmentKinds: ['怪物掉落'] }
+};
+
+// 仅记录潜水艇递归配方实际使用的兑换材料。凭证价格由应用内采购记录或市场快照提供。
+window.FF14_EXCHANGE_SOURCES = {
+  carriers: {
+    '15857': { name: '阿尔基克薰衣草', kind: '薰衣草/风茄兑换' },
+    '15858': { name: '虚无界风茄', kind: '薰衣草/风茄兑换' }
+  },
+  routes: [
+    { kind: '薰衣草/风茄兑换', label: '阿尔基克薰衣草兑换', carrierId: '15857', outputs: { '12526': 1, '12524': 3, '12522': 2 } },
+    { kind: '薰衣草/风茄兑换', label: '虚无界风茄兑换', carrierId: '15858', outputs: { '5121': 3, '5118': 3, '5113': 8, '5116': 6 } },
+    { kind: '天穹票兑换', label: '空贼白钢通货兑换', ticketCost: 40, outputs: { '12604': 9, '12526': 3, '12524': 6, '12522': 3, '12520': 6, '12518': 9 } },
+    { kind: '天穹票兑换', label: '空贼黄铜通货兑换', ticketCost: 40, outputs: { '12932': 10, '14147': 4, '14150': 4 } }
+  ]
+};
