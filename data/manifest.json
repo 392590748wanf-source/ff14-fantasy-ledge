@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "publishedAt": "2026-08-23T12:00:00.000Z",
   "bundle": {
-    "path": "data/data-bundle-0.0.1.json",
+    "path": "data-bundle-0.0.1.json",
     "sha256": "6c05684a367c2095ea71e1393446d28f4d610eb98be8d1fb71dfc163dd027d05",
     "bytes": 410866
   }

@@ -63,7 +63,7 @@ const manifest = {
   version: version.version,
   publishedAt: version.publishedAt,
   bundle: {
-    path: `data/${bundleFileName}`,
+    path: bundleFileName,
     sha256: sha256(bundleText),
     bytes: Buffer.byteLength(bundleText)
   }
