@@ -1,4 +1,4 @@
-# 金蝶幻想 Windows 客户端发布
+# LogFate Windows 客户端发布
 
 ## 本地运行与构建
 
@@ -10,7 +10,7 @@ pnpm start
 pnpm run dist:win
 ```
 
-安装包会生成在 `release/` 目录，例如 `ff14-fantasy-ledge-setup-1.0.2.exe`。首版只构建 Windows x64 的 NSIS 安装程序；安装向导和桌面快捷方式仍显示“金蝶幻想”。
+安装包会生成在 `release/` 目录，例如 `LogFate-Setup-1.1.0.exe`。首版只构建 Windows x64 的 NSIS 安装程序；安装向导和桌面快捷方式显示“LogFate”。
 
 ## 发布新版本
 
@@ -32,7 +32,7 @@ pnpm run dist:win
 4. 执行 `pnpm data:check`，提交资料文件并推送 `main`。
 5. Cloudflare Pages 完成部署后，客户端用户在“数据与更新 → 资料版本 → 重新检测”中确认下载并重载。
 
-资料包发布至 `https://ff14-fantasy-ledge.pages.dev/data/manifest.json`。资料更新只影响后续配方展示与成本预估，不会回写历史采购、制作或销售成本。
+正式资料包发布至 `https://logfate.com/data/manifest.json`。客户端在正式域名不可用时会回退读取 `https://ff14-fantasy-ledge.pages.dev/data/manifest.json` 测试站资料包。资料更新只影响后续配方展示与成本预估，不会回写历史采购、制作或销售成本。
 
 ## 数据迁移与备份
 

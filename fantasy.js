@@ -777,7 +777,7 @@ window.addEventListener('load', async () => {
     <link rel="stylesheet" href="app.css">
     <div class="app desktop-ledger">
       <header class="app-topbar">
-        <div class="app-brand"><img class="app-brand-icon" src="assets/app-icon-crown-hammer.png" alt="" aria-hidden="true">金蝶幻想 <span>FF14 成本账本</span></div>
+        <div class="app-brand"><img class="app-brand-icon" src="assets/app-icon-crown-hammer.png" alt="" aria-hidden="true">LogFate <span>FF14 成本账本</span></div>
         <nav class="app-primary-nav" aria-label="主导航">
           <button data-page="home">总览</button>
           <button id="equipment-toggle" aria-expanded="false">装备售卖 <span class="nav-caret">⌄</span></button>
@@ -2373,7 +2373,7 @@ window.addEventListener('load', async () => {
     const file = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(file), link = document.createElement('a');
     link.href = url;
-    link.download = `ff14-fantasy-backup-${today()}.json`;
+    link.download = `logfate-backup-${today()}.json`;
     link.click();
     URL.revokeObjectURL(url);
   };

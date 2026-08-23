@@ -37,7 +37,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           target_commitish: ${{ github.sha }}
-          name: 金蝶幻想 ${{ github.ref_name }}
+          name: LogFate ${{ github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |

@@ -8,7 +8,11 @@ const APP_ICON = path.join(__dirname, '..', 'build', 'icon.ico');
 const BACKUP_FORMAT = 'ff14-fantasy-backup';
 const BACKUP_VERSION = 1;
 const DATA_SCHEMA = 1;
-const DATA_MANIFEST_URL = 'https://ff14-fantasy-ledge.pages.dev/data/manifest.json';
+// 正式站点优先；域名切换完成前或生产站故障时，保留测试站资料包作为安全回退。
+const DATA_MANIFEST_URLS = [
+  'https://logfate.com/data/manifest.json',
+  'https://ff14-fantasy-ledge.pages.dev/data/manifest.json'
+];
 const DATASET_KEYS = ['nbbPreset', 'baseMaterials', 'submarineData', 'hqHelperFallback', 'retainerData', 'materialSources', 'exchangeSources'];
 const BACKUP_KEYS = new Set([
   'ff14-770',
@@ -78,17 +82,20 @@ const activeDataStatus = async () => {
   return { source: cached ? 'cache' : 'bundled', current: cached?.manifest || bundled, bundled };
 };
 const fetchDataManifest = async () => {
-  let response;
-  try {
-    response = await fetch(DATA_MANIFEST_URL, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
-  } catch (error) {
-    throw new Error(`无法连接数据服务器：${error.message}`);
+  const failures = [];
+  for (const manifestUrl of DATA_MANIFEST_URLS) {
+    try {
+      const response = await fetch(manifestUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+      if (!response.ok) throw new Error(`数据服务器返回 ${response.status}。`);
+      return { manifest: validateDataManifest(await response.json()), manifestUrl };
+    } catch (error) {
+      failures.push(`${new URL(manifestUrl).host}：${error.message}`);
+    }
   }
-  if (!response.ok) throw new Error(`数据服务器返回 ${response.status}。`);
-  return validateDataManifest(await response.json());
+  throw new Error(`无法连接数据服务器：${failures.join('；')}`);
 };
-const fetchDataBundle = async manifest => {
-  const url = new URL(manifest.bundle.path, DATA_MANIFEST_URL).toString();
+const fetchDataBundle = async (manifest, manifestUrl) => {
+  const url = new URL(manifest.bundle.path, manifestUrl).toString();
   let response;
   try {
     response = await fetch(url, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
@@ -147,7 +154,7 @@ const createWindow = () => {
     minWidth: 1080,
     minHeight: 700,
     show: false,
-    title: `金蝶幻想 · v${app.getVersion()}`,
+    title: `LogFate · v${app.getVersion()}`,
     icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -191,9 +198,9 @@ ipcMain.handle('backup:export', async (_event, rawBackup) => {
   const backup = normalizeBackup(rawBackup);
   const date = new Date().toISOString().slice(0, 10);
   const result = await dialog.showSaveDialog(mainWindow, {
-    title: '导出金蝶幻想账本备份',
-    defaultPath: `ff14-fantasy-backup-${date}.json`,
-    filters: [{ name: '金蝶幻想备份', extensions: ['json'] }]
+    title: '导出 LogFate 账本备份',
+    defaultPath: `logfate-backup-${date}.json`,
+    filters: [{ name: 'LogFate 备份', extensions: ['json'] }]
   });
   if (result.canceled || !result.filePath) return { canceled: true };
   await fs.writeFile(result.filePath, JSON.stringify(backup, null, 2), 'utf8');
@@ -202,9 +209,9 @@ ipcMain.handle('backup:export', async (_event, rawBackup) => {
 
 ipcMain.handle('backup:import', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: '导入金蝶幻想账本备份',
+    title: '导入 LogFate 账本备份',
     properties: ['openFile'],
-    filters: [{ name: '金蝶幻想备份', extensions: ['json'] }]
+    filters: [{ name: 'LogFate 备份', extensions: ['json'] }]
   });
   if (result.canceled || !result.filePaths[0]) return { canceled: true };
   try {
@@ -244,7 +251,8 @@ ipcMain.handle('data:load', async () => {
 
 ipcMain.handle('data:check', async () => {
   try {
-    const [status, latest] = await Promise.all([activeDataStatus(), fetchDataManifest()]);
+    const [status, remote] = await Promise.all([activeDataStatus(), fetchDataManifest()]);
+    const latest = remote.manifest;
     const updateAvailable = !sameVersion(status.current.version, latest.version);
     return {
       available: true,
@@ -260,12 +268,13 @@ ipcMain.handle('data:check', async () => {
 
 ipcMain.handle('data:apply', async () => {
   try {
-    const latest = await fetchDataManifest();
+    const remote = await fetchDataManifest();
+    const latest = remote.manifest;
     const status = await activeDataStatus();
     if (sameVersion(status.current.version, latest.version)) {
       return { available: true, updated: false, current: status.current, message: '当前资料已是最新版本。' };
     }
-    const { raw } = await fetchDataBundle(latest);
+    const { raw } = await fetchDataBundle(latest, remote.manifestUrl);
     await writeDataCache(latest, raw);
     return { available: true, updated: true, current: latest, message: `资料 ${latest.version} 已下载，重载后生效。` };
   } catch (error) {

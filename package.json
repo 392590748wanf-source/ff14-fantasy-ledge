@@ -1,7 +1,7 @@
 {
-  "name": "ff14-fantasy-ledge",
-  "productName": "金蝶幻想",
-  "version": "1.0.7",
+  "name": "logfate",
+  "productName": "LogFate",
+  "version": "1.1.0",
   "packageManager": "pnpm@11.19.0",
   "description": "FF14 装备与潜水艇成本、库存及销售利润账本",
   "author": "392590748wanf-source",
@@ -25,8 +25,8 @@
   },
   "build": {
     "appId": "com.ff14.fantasy.ledger",
-    "productName": "金蝶幻想",
-    "artifactName": "${name}-setup-${version}.${ext}",
+    "productName": "LogFate",
+    "artifactName": "LogFate-Setup-${version}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -52,13 +52,13 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "金蝶幻想"
+      "shortcutName": "LogFate"
     },
     "publish": [
       {
         "provider": "github",
         "owner": "392590748wanf-source",
-        "repo": "ff14-fantasy-ledge",
+        "repo": "logfate",
         "releaseType": "release"
       }
     ]
