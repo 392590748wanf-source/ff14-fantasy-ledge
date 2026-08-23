@@ -1,8 +1,44 @@
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  const startupDesktopBridge = window.ff14Desktop;
+  let externalDataBundle = null;
+  try {
+    externalDataBundle = (await startupDesktopBridge?.loadDataBundle())?.bundle || null;
+  } catch (error) {
+    console.warn('无法加载本机资料缓存，已使用内置资料。', error);
+  }
+  const externalDatasets = externalDataBundle?.datasets || {};
+  const datasetGlobals = {
+    baseMaterials: 'FF14_BASE_MATERIALS',
+    submarineData: 'FF14_SUBMARINE_DATA',
+    hqHelperFallback: 'FF14_HQHELPER_FALLBACK',
+    retainerData: 'FF14_RETAINER_DATA',
+    materialSources: 'FF14_MATERIAL_SOURCES',
+    exchangeSources: 'FF14_EXCHANGE_SOURCES'
+  };
+  Object.entries(datasetGlobals).forEach(([key, globalName]) => {
+    if (externalDatasets[key] && typeof externalDatasets[key] === 'object') window[globalName] = externalDatasets[key];
+  });
   const state = { page: 'home', type: null, expanded: false, submarineExpanded: false, submarineView: 'summary', submarinePartsOpen: false, guideView: 'crystals', guideExpanded: false, selectedMaterial: null, basicCategory: 'equipment', otherSearch: '', basicMaterialSearch: '', equipmentGroups: {}, equipmentSections: {}, guideCategories: {}, marketRefreshing: false, marketMessage: '', equipmentCombatTier: '770', equipmentGatheringTier: '750', equipmentSummaryTiers: { combat: '770', gathering: '750' }, submarineGroups: {}, itemIndexLoading: false };
   const data = JSON.parse(localStorage.getItem('ff14-770') || '{"m":[],"r":[],"p":{},"l":[]}');
+  const mergeMaterials = (defaults, saved) => {
+    const savedById = new Map((saved || []).map(item => [String(item.id), item]));
+    const defaultIds = new Set((defaults || []).map(item => String(item.id)));
+    return [
+      ...(defaults || []).map(item => {
+        const savedItem = savedById.get(String(item.id));
+        return savedItem ? { ...item, ...savedItem, id: item.id, n: item.n, uid: item.uid } : item;
+      }),
+      ...(saved || []).filter(item => !defaultIds.has(String(item.id)))
+    ];
+  };
+  const externalPreset = externalDatasets.nbbPreset;
+  if (externalPreset?.r && externalPreset?.m) {
+    const remoteRecipeIds = new Set(externalPreset.r.map(row => String(row.id)));
+    data.r = [...externalPreset.r, ...(data.r || []).filter(row => !remoteRecipeIds.has(String(row.id)))];
+    data.m = mergeMaterials(externalPreset.m, data.m || []);
+  }
   const savedMaterials = JSON.parse(localStorage.getItem('ff14-material-state') || 'null');
-  if (savedMaterials) data.m = savedMaterials;
+  if (savedMaterials) data.m = externalPreset?.m ? mergeMaterials(data.m, savedMaterials) : savedMaterials;
   const purchases = JSON.parse(localStorage.getItem('ff14-material-purchases') || '[]');
   const prices = JSON.parse(localStorage.getItem('ff14-fantasy-prices') || '{}');
   const submarineTicketSettings = JSON.parse(localStorage.getItem('ff14-submarine-ticket-settings') || '{"defaultUnitCost":80}');
@@ -736,7 +772,7 @@ window.addEventListener('load', () => {
     <dialog id="submarine-suite-dialog"><form id="submarine-suite-form" class="modal price-form"><h2 id="submarine-suite-title">新增潜水艇整套</h2><label>套装简称（船体、船尾、船首、舰桥；0 表示不含）<input id="submarine-suite-code" pattern="[0-5]{4}" maxlength="4" placeholder="例如 3124"></label><label><input id="submarine-suite-modified" type="checkbox" style="display:inline;width:auto;margin-right:6px">使用改级部件</label><label>建议售价<input id="submarine-suite-price" type="number" min="0" step="1"></label><div class="modal-actions"><button type="button" class="btn secondary" data-close="submarine-suite-dialog">取消</button><button class="btn">保存套装</button></div></form></dialog>
     <dialog id="npc-material-dialog"><div class="modal price-form"><div class="header"><div><h2>管理 NPC 购买材料</h2><div class="sub">仅能添加潜水艇推荐材料名录中的材料；加入后会从其他潜水艇分类中排除。</div></div><button class="btn secondary" data-close="npc-material-dialog">关闭</button></div><div id="npc-material-list"></div><hr style="border:0;border-top:1px solid #d6e1e4;margin:18px 0"><h3>添加 NPC 购买材料</h3><label>搜索潜水艇推荐材料<input id="npc-material-search" placeholder="输入名称或物品 ID"></label><div id="npc-material-results"></div><form id="npc-material-form"><input id="npc-material-id" type="hidden"><input id="npc-material-name" type="hidden"><label>NPC 采购价<input id="npc-material-price" type="number" min="0" required></label><label>购买来源<input id="npc-material-source" placeholder="例如 NPC 名称或商店" required></label><div class="modal-actions"><button class="btn">加入 NPC 分类</button></div></form></div></dialog>
     <dialog id="report-reconcile-dialog"><form id="report-reconcile-form" class="modal price-form"><h2>补全销售记录来源</h2><div id="report-reconcile-summary" class="card" style="box-shadow:none;background:#f3f8f9"></div><label>销售日期<input id="report-reconcile-date" type="date" required></label><label>记录名称<input id="report-reconcile-item" required></label><label>销售额<input id="report-reconcile-amount" type="number" min="0" step="1" required></label><label>销售成本<input id="report-reconcile-cost" type="number" min="0" step="1" required></label><label>利润<input id="report-reconcile-profit" type="number" step="1" required></label><label>归属类型<select id="report-reconcile-kind"><option value="equipment">装备销售</option><option value="part">潜水艇单件</option><option value="suite">潜水艇整套</option></select></label><label>对应项目<select id="report-reconcile-target"></select></label><div class="modal-actions"><button type="button" class="btn secondary" data-close="report-reconcile-dialog">取消</button><button class="btn">保存归属</button></div></form></dialog>
-    <dialog id="backup-dialog"><div class="modal price-form"><div class="header"><div><h2>数据备份</h2><div id="backup-status" class="sub">导出可保存本机账本；导入会覆盖当前数据。</div></div><button class="btn secondary" data-close="backup-dialog">关闭</button></div><div class="backup-actions"><button id="backup-export" class="btn secondary" type="button">导出账本 JSON</button><button id="backup-import" class="btn secondary" type="button">导入账本 JSON</button><button id="desktop-update-check" class="btn secondary" type="button" hidden>检查客户端更新</button><button id="desktop-update-restart" class="btn" type="button" hidden>重启并安装更新</button></div><input id="backup-import-input" type="file" accept="application/json,.json" hidden></div></dialog>
+    <dialog id="backup-dialog"><div class="modal price-form"><div class="header"><div><h2>数据与更新</h2><div id="backup-status" class="sub">导出可保存本机账本；导入会覆盖当前数据。</div></div><button class="btn secondary" data-close="backup-dialog">关闭</button></div><div class="backup-actions"><button id="backup-export" class="btn secondary" type="button">导出账本 JSON</button><button id="backup-import" class="btn secondary" type="button">导入账本 JSON</button></div><div id="desktop-update-panels" class="update-panels" hidden><section class="update-panel"><div><h3>资料版本</h3><p id="data-update-current" class="sub">正在读取本机资料版本…</p><p id="data-update-latest" class="sub">手动检查后显示最新版本。</p></div><div class="backup-actions"><button id="data-update-check" class="btn secondary" type="button">重新检测</button><button id="data-update-apply" class="btn" type="button" hidden>下载并应用资料</button></div></section><section class="update-panel"><div><h3>客户端版本</h3><p id="desktop-update-current" class="sub">正在读取客户端版本…</p><p id="desktop-update-latest" class="sub">手动检查后显示最新版本。</p></div><div class="backup-actions"><button id="desktop-update-check" class="btn secondary" type="button">重新检测</button><button id="desktop-update-restart" class="btn" type="button" hidden>重启并安装更新</button></div></section></div><input id="backup-import-input" type="file" accept="application/json,.json" hidden></div></dialog>
   `;
 
   const reportFieldsValid = row => Boolean(row?.date && row?.item && Number.isFinite(Number(row.amount)) && Number.isFinite(Number(row.cost)) && Number.isFinite(Number(row.profit)));
@@ -2290,9 +2326,26 @@ window.addEventListener('load', () => {
     URL.revokeObjectURL(url);
   };
   const desktopBridge = window.ff14Desktop;
+  const desktopUpdatePanels = document.querySelector('#desktop-update-panels');
+  const dataUpdateCurrent = document.querySelector('#data-update-current');
+  const dataUpdateLatest = document.querySelector('#data-update-latest');
+  const dataUpdateApply = document.querySelector('#data-update-apply');
+  const desktopUpdateCurrent = document.querySelector('#desktop-update-current');
+  const desktopUpdateLatest = document.querySelector('#desktop-update-latest');
+  const formatDataVersion = info => info ? `${info.version} · ${String(info.publishedAt || '').replace('T', ' ').replace('.000Z', '')}` : '未读取到资料版本';
+  const refreshDataStatus = async () => {
+    const result = await desktopBridge?.getDataStatus();
+    if (!result?.available) {
+      dataUpdateCurrent.textContent = result?.message || '无法读取本机资料版本。';
+      return;
+    }
+    dataUpdateCurrent.textContent = `当前资料：${formatDataVersion(result.current)}${result.source === 'cache' ? '（已下载）' : '（内置）'}`;
+    desktopUpdateCurrent.textContent = `当前版本：v${result.clientVersion || '—'}`;
+  };
   document.querySelector('#backup-toggle').onclick = () => {
     setBackupStatus(desktopBridge ? '客户端数据保存在本机。导入会覆盖当前账本。' : '导出可保存浏览器账本；导入会覆盖当前数据。');
-    document.querySelector('#desktop-update-check').hidden = !desktopBridge;
+    desktopUpdatePanels.hidden = !desktopBridge;
+    if (desktopBridge) refreshDataStatus();
     if (!backupDialog.open) backupDialog.showModal();
   };
   document.querySelector('#backup-export').onclick = async () => {
@@ -2321,11 +2374,40 @@ window.addEventListener('load', () => {
   };
   document.querySelector('#desktop-update-check').onclick = async () => {
     const result = await desktopBridge?.checkForUpdates();
-    if (result?.message) setBackupStatus(result.message);
+    if (result?.message) desktopUpdateLatest.textContent = result.message;
+  };
+  document.querySelector('#data-update-check').onclick = async () => {
+    dataUpdateLatest.textContent = '正在检查资料更新…';
+    dataUpdateApply.hidden = true;
+    const result = await desktopBridge?.checkDataUpdates();
+    if (!result?.available) {
+      dataUpdateLatest.textContent = result?.message || '资料更新检查失败。';
+      return;
+    }
+    dataUpdateLatest.textContent = result.updateAvailable
+      ? `最新资料：${formatDataVersion(result.latest)}`
+      : '当前资料已是最新版本。';
+    dataUpdateApply.hidden = !result.updateAvailable;
+  };
+  document.querySelector('#data-update-apply').onclick = async () => {
+    if (!confirm('下载并应用最新资料？已完成的采购、制作与销售历史不会被修改。')) return;
+    dataUpdateApply.disabled = true;
+    dataUpdateApply.textContent = '正在下载…';
+    const result = await desktopBridge?.applyDataUpdate();
+    dataUpdateApply.disabled = false;
+    dataUpdateApply.textContent = '下载并应用资料';
+    if (!result?.available) {
+      dataUpdateLatest.textContent = result?.message || '资料更新失败，已保留当前资料。';
+      return;
+    }
+    dataUpdateLatest.textContent = result.message;
+    dataUpdateApply.hidden = true;
+    await refreshDataStatus();
+    if (result.updated && confirm('资料已下载，立即重载以使用新资料吗？')) location.reload();
   };
   document.querySelector('#desktop-update-restart').onclick = () => desktopBridge?.restartToUpdate();
   if (desktopBridge) desktopBridge.onUpdateStatus(status => {
-    setBackupStatus(status.message || '客户端更新状态已更新。');
+    desktopUpdateLatest.textContent = status.message || '客户端更新状态已更新。';
     const restart = document.querySelector('#desktop-update-restart');
     restart.hidden = status.state !== 'downloaded';
     if (status.state === 'downloaded' && confirm(`${status.message}\n现在重启并安装吗？`)) desktopBridge.restartToUpdate();

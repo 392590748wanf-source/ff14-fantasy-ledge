@@ -6,6 +6,10 @@ contextBridge.exposeInMainWorld('ff14Desktop', {
   importBackup: () => ipcRenderer.invoke('backup:import'),
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   restartToUpdate: () => ipcRenderer.invoke('updater:restart'),
+  getDataStatus: () => ipcRenderer.invoke('data:status'),
+  loadDataBundle: () => ipcRenderer.invoke('data:load'),
+  checkDataUpdates: () => ipcRenderer.invoke('data:check'),
+  applyDataUpdate: () => ipcRenderer.invoke('data:apply'),
   onUpdateStatus: callback => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on('updater:status', listener);

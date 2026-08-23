@@ -2,10 +2,14 @@ const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { createHash, randomUUID } = require('node:crypto');
 
 const APP_ICON = path.join(__dirname, '..', 'build', 'icon.ico');
 const BACKUP_FORMAT = 'ff14-fantasy-backup';
 const BACKUP_VERSION = 1;
+const DATA_SCHEMA = 1;
+const DATA_MANIFEST_URL = 'https://ff14-fantasy-ledge.pages.dev/data/manifest.json';
+const DATASET_KEYS = ['nbbPreset', 'baseMaterials', 'submarineData', 'hqHelperFallback', 'retainerData', 'materialSources', 'exchangeSources'];
 const BACKUP_KEYS = new Set([
   'ff14-770',
   'ff14-material-state',
@@ -23,6 +27,101 @@ const BACKUP_KEYS = new Set([
 ]);
 
 let mainWindow;
+
+const bundledDataManifestPath = () => path.join(__dirname, '..', 'data', 'manifest.json');
+const dataCacheDirectory = () => path.join(app.getPath('userData'), 'data-cache');
+const dataCachePaths = () => ({
+  directory: dataCacheDirectory(),
+  manifest: path.join(dataCacheDirectory(), 'manifest.json'),
+  bundle: path.join(dataCacheDirectory(), 'data-bundle.json')
+});
+const sha256 = value => createHash('sha256').update(value).digest('hex');
+const sameVersion = (left, right) => String(left || '') === String(right || '');
+
+const validateDataManifest = manifest => {
+  if (!manifest || Number(manifest.schema) !== DATA_SCHEMA || !manifest.version || !manifest.publishedAt || !manifest.bundle) {
+    throw new Error('数据清单格式不正确。');
+  }
+  if (!manifest.bundle.path || !/^[a-f0-9]{64}$/i.test(String(manifest.bundle.sha256 || ''))) {
+    throw new Error('数据清单缺少有效校验信息。');
+  }
+  return manifest;
+};
+
+const validateDataBundle = (raw, manifest) => {
+  const bundle = JSON.parse(raw);
+  if (!bundle || Number(bundle.schema) !== DATA_SCHEMA || !sameVersion(bundle.version, manifest.version) || !bundle.datasets) {
+    throw new Error('数据包版本或结构不正确。');
+  }
+  if (!DATASET_KEYS.every(key => bundle.datasets[key] && typeof bundle.datasets[key] === 'object')) {
+    throw new Error('数据包缺少必要资料。');
+  }
+  return bundle;
+};
+
+const readJsonFile = async file => JSON.parse(await fs.readFile(file, 'utf8'));
+const readBundledDataManifest = async () => validateDataManifest(await readJsonFile(bundledDataManifestPath()));
+const readCachedData = async () => {
+  const paths = dataCachePaths();
+  try {
+    const [manifest, raw] = await Promise.all([readJsonFile(paths.manifest), fs.readFile(paths.bundle, 'utf8')]);
+    validateDataManifest(manifest);
+    if (sha256(raw) !== String(manifest.bundle.sha256).toLowerCase()) throw new Error('缓存数据校验失败。');
+    return { manifest, bundle: validateDataBundle(raw, manifest) };
+  } catch {
+    return null;
+  }
+};
+const activeDataStatus = async () => {
+  const bundled = await readBundledDataManifest();
+  const cached = await readCachedData();
+  return { source: cached ? 'cache' : 'bundled', current: cached?.manifest || bundled, bundled };
+};
+const fetchDataManifest = async () => {
+  let response;
+  try {
+    response = await fetch(DATA_MANIFEST_URL, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+  } catch (error) {
+    throw new Error(`无法连接数据服务器：${error.message}`);
+  }
+  if (!response.ok) throw new Error(`数据服务器返回 ${response.status}。`);
+  return validateDataManifest(await response.json());
+};
+const fetchDataBundle = async manifest => {
+  const url = new URL(manifest.bundle.path, DATA_MANIFEST_URL).toString();
+  let response;
+  try {
+    response = await fetch(url, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+  } catch (error) {
+    throw new Error(`无法下载数据包：${error.message}`);
+  }
+  if (!response.ok) throw new Error(`数据包下载失败（${response.status}）。`);
+  const raw = Buffer.from(await response.arrayBuffer()).toString('utf8');
+  if (sha256(raw) !== String(manifest.bundle.sha256).toLowerCase()) throw new Error('数据包校验失败，文件未被应用。');
+  return { raw, bundle: validateDataBundle(raw, manifest) };
+};
+const writeDataCache = async (manifest, raw) => {
+  const paths = dataCachePaths();
+  await fs.mkdir(paths.directory, { recursive: true });
+  const suffix = randomUUID();
+  const nextBundle = `${paths.bundle}.${suffix}.next`;
+  const nextManifest = `${paths.manifest}.${suffix}.next`;
+  const previousBundle = `${paths.bundle}.${suffix}.previous`;
+  const previousManifest = `${paths.manifest}.${suffix}.previous`;
+  await Promise.all([fs.writeFile(nextBundle, raw, 'utf8'), fs.writeFile(nextManifest, JSON.stringify(manifest, null, 2), 'utf8')]);
+  try {
+    await fs.rename(paths.bundle, previousBundle).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    await fs.rename(paths.manifest, previousManifest).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    await fs.rename(nextBundle, paths.bundle);
+    await fs.rename(nextManifest, paths.manifest);
+    await Promise.all([fs.rm(previousBundle, { force: true }), fs.rm(previousManifest, { force: true })]);
+  } catch (error) {
+    await Promise.all([fs.rm(nextBundle, { force: true }), fs.rm(nextManifest, { force: true })]);
+    if (await fs.stat(previousBundle).then(() => true).catch(() => false)) await fs.rename(previousBundle, paths.bundle).catch(() => {});
+    if (await fs.stat(previousManifest).then(() => true).catch(() => false)) await fs.rename(previousManifest, paths.manifest).catch(() => {});
+    throw error;
+  }
+};
 
 const sendUpdateStatus = status => {
   BrowserWindow.getAllWindows().forEach(window => window.webContents.send('updater:status', status));
@@ -48,7 +147,7 @@ const createWindow = () => {
     minWidth: 1080,
     minHeight: 700,
     show: false,
-    title: '金蝶幻想',
+    title: `金蝶幻想 · v${app.getVersion()}`,
     icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -127,6 +226,51 @@ ipcMain.handle('updater:check', async () => {
 
 ipcMain.handle('updater:restart', () => {
   if (app.isPackaged) autoUpdater.quitAndInstall();
+});
+
+ipcMain.handle('data:status', async () => {
+  try {
+    return { available: true, clientVersion: app.getVersion(), ...(await activeDataStatus()) };
+  } catch (error) {
+    return { available: false, message: error.message || '无法读取本机数据版本。' };
+  }
+});
+
+ipcMain.handle('data:load', async () => {
+  const cached = await readCachedData();
+  const status = await activeDataStatus();
+  return { bundle: cached?.bundle || null, ...status };
+});
+
+ipcMain.handle('data:check', async () => {
+  try {
+    const [status, latest] = await Promise.all([activeDataStatus(), fetchDataManifest()]);
+    const updateAvailable = !sameVersion(status.current.version, latest.version);
+    return {
+      available: true,
+      current: status.current,
+      latest,
+      updateAvailable,
+      message: updateAvailable ? `发现资料更新 ${latest.version}。` : '当前资料已是最新版本。'
+    };
+  } catch (error) {
+    return { available: false, message: error.message || '数据更新检查失败。' };
+  }
+});
+
+ipcMain.handle('data:apply', async () => {
+  try {
+    const latest = await fetchDataManifest();
+    const status = await activeDataStatus();
+    if (sameVersion(status.current.version, latest.version)) {
+      return { available: true, updated: false, current: status.current, message: '当前资料已是最新版本。' };
+    }
+    const { raw } = await fetchDataBundle(latest);
+    await writeDataCache(latest, raw);
+    return { available: true, updated: true, current: latest, message: `资料 ${latest.version} 已下载，重载后生效。` };
+  } catch (error) {
+    return { available: false, message: error.message || '资料更新失败，已保留当前资料。' };
+  }
 });
 
 app.whenReady().then(() => {

@@ -26,6 +26,11 @@ body { margin: 0; background: var(--surface); color: var(--ink); font: 14px "Mic
 .app-utility-button { min-height: 28px; padding: 4px 9px; border: 1px solid var(--line-strong); border-radius: 3px; background: #fff; color: var(--ink); font: 12px "Microsoft YaHei", system-ui, sans-serif; cursor: pointer; }
 .app-utility-button:hover { border-color: #9da3a6; background: var(--surface-soft); }
 .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.update-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.update-panel { display: grid; align-content: start; gap: 10px; padding: 14px; border: 1px solid var(--line-strong); background: #fff; }
+.update-panel h3, .update-panel p { margin: 0; }
+.update-panel h3 { font-size: 15px; }
+.update-panel p { min-height: 20px; }
 .app-contextbar { display: flex; min-height: 39px; padding: 0 28px; border-bottom: 1px solid var(--line); background: #fff; }
 .context-nav { display: none; align-items: center; gap: 6px; padding: 0; }
 .context-nav.open { display: flex; }
@@ -225,6 +230,7 @@ dialog::backdrop, #bundle-detail-dialog::backdrop { background: #00000024; }
   .card:nth-child(2) { border-right: 0; }
   .card:nth-child(n+3) { border-top: 1px solid var(--line); }
   .crystal-grid, .equipment-summaries { grid-template-columns: 1fr; }
+  .update-panels { grid-template-columns: 1fr; }
   .submarine-total-profit { align-items: flex-start; flex-direction: column; }
   .submarine-profit-columns { grid-template-columns: 1fr; }
   .submarine-profit-pane + .submarine-profit-pane { border-top: 1px dashed var(--line-strong); border-left: 0; }
