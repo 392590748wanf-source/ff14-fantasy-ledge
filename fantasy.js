@@ -2332,7 +2332,7 @@ window.addEventListener('load', async () => {
   const dataUpdateApply = document.querySelector('#data-update-apply');
   const desktopUpdateCurrent = document.querySelector('#desktop-update-current');
   const desktopUpdateLatest = document.querySelector('#desktop-update-latest');
-  const formatDataVersion = info => info ? `${info.version} · ${String(info.publishedAt || '').replace('T', ' ').replace('.000Z', '')}` : '未读取到资料版本';
+  const formatDataVersion = info => info?.version ? String(info.version) : '未读取到资料版本';
   const refreshDataStatus = async () => {
     const result = await desktopBridge?.getDataStatus();
     if (!result?.available) {

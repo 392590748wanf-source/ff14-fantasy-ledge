@@ -6,7 +6,6 @@ import vm from 'node:vm';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputDirectory = join(root, 'data');
-const bundlePath = join(outputDirectory, 'data-bundle.json');
 const manifestPath = join(outputDirectory, 'manifest.json');
 const versionPath = join(outputDirectory, 'version.json');
 const checkOnly = process.argv.includes('--check');
@@ -32,6 +31,8 @@ const sha256 = value => createHash('sha256').update(value).digest('hex');
 
 const version = JSON.parse(await readFile(versionPath, 'utf8'));
 if (!version.version || !version.publishedAt) throw new Error('data/version.json 必须包含 version 与 publishedAt。');
+const bundleFileName = `data-bundle-${String(version.version).replace(/[^0-9A-Za-z._-]/g, '-')}.json`;
+const bundlePath = join(outputDirectory, bundleFileName);
 
 const presetSandbox = createSandbox();
 await execute(presetSandbox, 'nbb-preset.js');
@@ -62,7 +63,7 @@ const manifest = {
   version: version.version,
   publishedAt: version.publishedAt,
   bundle: {
-    path: 'data/data-bundle.json',
+    path: `data/${bundleFileName}`,
     sha256: sha256(bundleText),
     bytes: Buffer.byteLength(bundleText)
   }
