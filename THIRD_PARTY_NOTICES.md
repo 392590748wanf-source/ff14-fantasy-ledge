@@ -4,10 +4,16 @@
 
 - 来源：<https://github.com/InfSein/hqhelper-dawntrail>
 - 用途：物品、制作配方、产出数量与兑换关系的版本固定校验 / 缺失回退数据；职业图标名称与职业映射的校验来源。
-- 本项目不复用该项目的界面或业务代码；生成的 `hqhelper-fallback.js` 仅保留本项目 770、750 与潜水艇配方树需要的数据。水晶 PNG 按其 `items.json` 的图标 ID，从 HqHelper 使用的 `icon.nbbjack.com` 图标源下载并随本站静态资源发布，浏览器运行时不请求外部图床。
+- 本项目不复用该项目的界面或业务代码；生成的 `hqhelper-fallback.js` 仅保留本项目 770、750 与潜水艇配方树需要的数据。HqHelper 不再作为物品图标来源。
 - 许可证：MIT License，Copyright (c) 2024 InfSein。
 
 该来源的数据快照以文件内 `meta.commit` 为准。灰机 Wiki 仍为主配方来源；Universalis 仅提供中国区市场价格。
+
+## Garland Tools
+
+- 来源：<https://www.garlandtools.org/>
+- 用途：同步时按物品 ID 读取公开物品资料中的图标编号；页面运行时从 `https://www.garlandtools.org/files/icons/item/{iconId}.png` 加载图标。
+- 图标仅用于物品识别，不会打入安装包；无法加载时页面保留纯文字显示。
 
 ## 优雷卡元素图标
 

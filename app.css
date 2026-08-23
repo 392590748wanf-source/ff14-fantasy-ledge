@@ -36,14 +36,13 @@ body { margin: 0; background: var(--surface); color: var(--ink); font: 14px "Mic
 .context-nav.open { display: flex; }
 .context-nav button { padding: 5px 8px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); font: 12px "Microsoft YaHei", sans-serif; cursor: pointer; }
 .context-nav button.active { border-color: var(--line-strong); background: #fff; color: var(--ink); font-weight: 700; }
-.equipment-type-nav { min-height: 62px; gap: 12px; align-items: center; }
-.equipment-type-nav button { position: relative; width: 190px; min-width: 190px; height: 42px; min-height: 42px; padding: 9px 18px; border: 1px solid #cfd3d5; border-radius: 3px; background: linear-gradient(#fff, #fafafa); box-shadow: inset 0 1px #fff, 0 1px 0 #e8eaeb; color: #58666e; font: 16px "Microsoft YaHei", sans-serif; font-weight: 700; letter-spacing: .02em; text-align: left; text-shadow: 0 1px #fff; transition: border-color .16s ease, color .16s ease, background-color .16s ease, box-shadow .16s ease; }
-.equipment-type-nav button:hover { border-color: #aeb4b7; background: linear-gradient(#fff, #f5f6f6); color: var(--ink); box-shadow: inset 0 1px #fff, 0 1px 2px #00000012; }
-.equipment-type-nav button.active { border-color: #979da0; background: linear-gradient(#fff, #f7f7f7); color: var(--ink); font-weight: 700; box-shadow: inset 0 2px #f0f1f1, 0 1px 2px #00000016; }
-.equipment-type-nav button.active::before { position: absolute; top: 8px; bottom: 8px; left: 7px; width: 2px; background: var(--ink); content: ""; }
-.equipment-type-nav button.active { padding-left: 18px; }
-.equipment-type-nav button:active { background: #f2f3f3; box-shadow: inset 0 1px 3px #00000016; }
-.equipment-type-nav button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.equipment-type-nav { min-height: 48px; gap: 24px; align-items: stretch; }
+.equipment-type-nav button { position: relative; width: auto; min-width: 0; height: auto; min-height: 0; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; box-shadow: none; color: var(--muted); font: 15px "Microsoft YaHei", sans-serif; font-weight: 400; letter-spacing: 0; text-align: center; text-shadow: none; transition: border-color .16s ease, color .16s ease; }
+.equipment-type-nav button:hover { border-color: #9da3a6; background: transparent; box-shadow: none; color: var(--ink); }
+.equipment-type-nav button.active { border-color: var(--ink); background: transparent; box-shadow: none; color: var(--ink); font-weight: 700; }
+.equipment-type-nav button.active::before { content: none; }
+.equipment-type-nav button:active { background: transparent; box-shadow: none; }
+.equipment-type-nav button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .equipment-page-actions { display: flex; align-items: end; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .equipment-grade-picker { display: grid; gap: 4px; min-width: 118px; color: var(--muted); font-size: 12px; }
 .equipment-grade-picker select { min-height: 34px; padding: 5px 28px 5px 9px; border: 1px solid var(--ink); border-radius: 2px; background: #fff; color: var(--ink); font: 700 15px "Microsoft YaHei", sans-serif; }
@@ -93,6 +92,13 @@ main { max-width: none; width: 100%; margin: 0; padding: 22px 28px 36px; }
 .ledger td.margin, .margin { color: var(--muted); }
 .bundle-link { color: inherit; font-weight: 400; }
 .bundle-link:hover { color: inherit; text-decoration: underline; }
+.item-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; vertical-align: middle; }
+.item-icon { display: block; width: 24px; height: 24px; flex: 0 0 24px; object-fit: contain; image-rendering: auto; }
+/* 水晶图标保留原有 32px 尺寸与完整画面；去掉旧样式的投影，避免透明边缘产生悬浮小点。 */
+.crystal-image { width: 32px; height: 32px; overflow: visible; }
+.crystal-game-icon { width: 32px; height: 32px; filter: none; }
+.bundle-link .item-label { text-align: left; }
+.ledger td.label .item-label { max-width: 100%; }
 .job-badge { display: inline-grid; place-items: center; width: 22px; height: 22px; flex: 0 0 22px; overflow: visible !important; border: 0; border-radius: 0; background: transparent; vertical-align: middle; }
 .job-badge.role-badge { width: 28px; height: 28px; flex-basis: 28px; }
 .job-badge img { display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
@@ -150,7 +156,7 @@ main { max-width: none; width: 100%; margin: 0; padding: 22px 28px 36px; }
 .basic-material-search-result span, .basic-material-search-result em { color: var(--muted); font-style: normal; }
 .basic-material-search-result em { grid-column: 1 / -1; margin-top: 3px; }
 .material-search-hit > td { background: #fff7c9 !important; transition: background-color .35s ease; }
-.submarine-total-profit { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-top: 20px; padding: 19px 20px; border: 1px solid var(--ink); background: #fff; }
+.submarine-total-profit { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-top: 20px; padding: 19px 20px 18px; border: 0; border-bottom: 1px solid var(--line-strong); border-left: 3px solid var(--positive); background: linear-gradient(90deg, #f7fbf9 0%, #fff 52%); }
 .submarine-total-profit small { color: var(--muted); font-size: 13px; }
 .submarine-total-profit > div:first-child > b { display: block; margin-top: 4px; font-size: 32px; letter-spacing: -.02em; }
 .submarine-total-breakdown { display: flex; gap: 18px; color: var(--muted); font-size: 13px; }
@@ -166,7 +172,7 @@ main { max-width: none; width: 100%; margin: 0; padding: 22px 28px 36px; }
 .submarine-profit-pane h2 { display: flex; align-items: center; min-height: 42px; margin: 0; }
 .submarine-profit-pane .table-wrap { flex: 1; margin: 0; border: 0; }
 .submarine-profit-pane .ledger thead th { height: 36px; }
-.submarine-material-link { border: 0; border-bottom: 1px solid currentColor; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.submarine-material-link { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }
 .submarine-material-link:hover { color: #17648b; }
 .submarine-material-link:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 #recipe-reference-dialog { width: min(1040px, calc(100vw - 32px)); max-width: none; max-height: 88vh; padding: 0; overflow: hidden; }

@@ -4,6 +4,7 @@
  * 运行方式：node tools/sync-hqhelper-fallback.mjs
  *
  * 仅保留当前 770 / 750 与潜水艇配方树可达的物品、配方和兑换记录，
+ * 并额外生成 Garland Tools 的物品 ID → 图标 ID 索引，供页面展示与“其他材料”搜索时按需加载。
  * 页面运行时不会访问 GitHub。
  */
 import { readFile, writeFile } from 'node:fs/promises';
@@ -14,6 +15,7 @@ const repo = 'InfSein/hqhelper-dawntrail';
 const commit = process.env.HQHELPER_COMMIT || 'ade07045d2de8545c6ac46d647076cff0bc3fc50';
 const baseUrl = `https://raw.githubusercontent.com/${repo}/${commit}/src/assets/data/unpacks`;
 const cacheDir = process.env.HQHELPER_DATA_DIR;
+const garlandBaseUrl = 'https://www.garlandtools.org/db/doc/item/en/3';
 
 const loadWindowData = async (filename, key) => {
   const source = await readFile(new URL(`../${filename}`, import.meta.url), 'utf8');
@@ -37,6 +39,34 @@ const fetchJson = async filename => {
   }
 };
 
+const fetchGarlandIcon = async id => {
+  try {
+    const response = await fetch(`${garlandBaseUrl}/${encodeURIComponent(id)}.json`);
+    if (!response.ok) return 0;
+    const payload = await response.json();
+    return Number(payload?.item?.icon || 0);
+  } catch {
+    return 0;
+  }
+};
+
+const fetchGarlandIcons = async ids => {
+  const queue = [...new Set(ids.map(String).filter(id => /^\d+$/.test(id)))];
+  const index = {};
+  const missing = [];
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < queue.length) {
+      const id = queue[cursor++];
+      const icon = await fetchGarlandIcon(id);
+      if (icon > 0) index[id] = icon;
+      else missing.push(Number(id));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, queue.length) }, worker));
+  return { index, missing };
+};
+
 const pairs = values => {
   const output = [];
   for (let index = 0; index < (values || []).length; index += 2) {
@@ -48,6 +78,7 @@ const pairs = values => {
 
 const baseMaterials = await loadWindowData('base-materials.js', 'FF14_BASE_MATERIALS');
 const submarineData = await loadWindowData('submarine-data.js', 'FF14_SUBMARINE_DATA');
+const materialSources = await loadWindowData('material-sources.js', 'FF14_MATERIAL_SOURCES');
 const [items, recipes, trades] = await Promise.all([
   fetchJson('items.json'), fetchJson('recipes.json'), fetchJson('trade-map.json')
 ]);
@@ -68,6 +99,9 @@ const roots = new Set([
   ...Array.from({ length: 18 }, (_, index) => String(index + 2)),
   ...Object.keys(baseMaterials.b || {}),
   ...Object.keys(baseMaterials.d || {}),
+  // 材料指导价中存在 NPC、兑换等来源定义、但未必可由当前配方树反向抵达的项目，
+  // 同样写入常用回退快照，让材料页无需加载完整搜索图标索引。
+  ...Object.keys(materialSources || {}),
   ...(submarineData.parts || []).map(part => String(part.id)),
   // HqHelper 不包含部队合建部件本身；以现有潜水艇配方图中的所有节点为种子，
   // 才能收集可制作半成品及其下级配方，作为工房数据缺失时的回退。
@@ -148,6 +182,18 @@ const payload = {
   audit
 };
 
+// Garland 的 item.id 与 icon.id 并不相同，因此不能以物品 ID 拼接图标地址。
+// 常用配方树在同步时一次性取得图标编号；页面打开时无需逐项查询外站。
+const commonIconIds = [...new Set([...roots, ...visited, ...Object.keys(selectedItems)])];
+const garlandIcons = await fetchGarlandIcons(commonIconIds);
+payload.icons = garlandIcons.index;
+payload.meta.iconSource = 'Garland Tools';
+payload.meta.iconSourceUrl = 'https://www.garlandtools.org/';
+payload.audit.garlandIconCount = Object.keys(garlandIcons.index).length;
+payload.audit.garlandIconMissing = garlandIcons.missing;
+
 const output = `// 由 tools/sync-hqhelper-fallback.mjs 生成；请勿手工编辑。\nwindow.FF14_HQHELPER_FALLBACK=${JSON.stringify(payload)};\n`;
 await writeFile(new URL('../hqhelper-fallback.js', import.meta.url), output, 'utf8');
-console.log(`已生成 hqhelper-fallback.js：${Object.keys(selectedItems).length} 个物品，${Object.keys(selectedRecipes).length} 组配方，提交 ${commit.slice(0, 12)}；工房冲突 ${conflicts.length} 组、装备直接配方冲突 ${baseDirectConflicts.length} 组。`);
+const iconOutput = `// 由 tools/sync-hqhelper-fallback.mjs 生成；Garland Tools 图标 ID，供其他材料搜索按需加载。\nwindow.FF14_ITEM_ICON_INDEX=${JSON.stringify(garlandIcons.index)};\n`;
+await writeFile(new URL('../item-icon-index.js', import.meta.url), iconOutput, 'utf8');
+console.log(`已生成 hqhelper-fallback.js（${Object.keys(selectedItems).length} 个物品）与 item-icon-index.js（${Object.keys(garlandIcons.index).length} 个 Garland 图标），${Object.keys(selectedRecipes).length} 组配方，提交 ${commit.slice(0, 12)}；工房冲突 ${conflicts.length} 组、装备直接配方冲突 ${baseDirectConflicts.length} 组。`);

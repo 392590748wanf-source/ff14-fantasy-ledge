@@ -27,9 +27,10 @@ pnpm run dist:win
 客户端程序和资料包使用不同版本。资料更新不需要修改 `package.json`、创建 `v1.0.x` 标签或重新安装客户端：
 
 1. 修改配方、潜水艇、材料来源或雇员资料后，更新 `data/version.json` 的资料版本和发布时间。
-2. 执行 `pnpm data:build` 生成带资料版本号的 `data/data-bundle-*.json` 与 `data/manifest.json`。
-3. 执行 `pnpm data:check`，提交资料文件并推送 `main`。
-4. Cloudflare Pages 完成部署后，客户端用户在“数据与更新 → 资料版本 → 重新检测”中确认下载并重载。
+2. 如新增或调整物品，需要先执行 `pnpm icons:sync` 更新 Garland Tools 图标索引。
+3. 执行 `pnpm data:build` 生成带资料版本号的 `data/data-bundle-*.json` 与 `data/manifest.json`。
+4. 执行 `pnpm data:check`，提交资料文件并推送 `main`。
+5. Cloudflare Pages 完成部署后，客户端用户在“数据与更新 → 资料版本 → 重新检测”中确认下载并重载。
 
 资料包发布至 `https://ff14-fantasy-ledge.pages.dev/data/manifest.json`。资料更新只影响后续配方展示与成本预估，不会回写历史采购、制作或销售成本。
 
