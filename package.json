@@ -1,7 +1,7 @@
 {
   "name": "ff14-fantasy-ledge",
   "productName": "金蝶幻想",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "packageManager": "pnpm@11.19.0",
   "description": "FF14 装备与潜水艇成本、库存及销售利润账本",
   "author": "392590748wanf-source",
@@ -13,7 +13,7 @@
     "data:build": "node tools/build-data-bundle.mjs",
     "data:check": "node tools/build-data-bundle.mjs --check",
     "dist:win": "electron-builder --win nsis --x64 --publish never",
-    "release": "electron-builder --win nsis --x64 --publish always"
+    "release": "pnpm run dist:win"
   },
   "devDependencies": {
     "electron": "^37.0.0",

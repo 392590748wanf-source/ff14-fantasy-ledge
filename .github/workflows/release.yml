@@ -29,7 +29,26 @@ jobs:
         run: |
           $version = node -p "require('./package.json').version"
           if ("v$version" -ne "${{ github.ref_name }}") { throw "标签 ${{ github.ref_name }} 必须与 package.json 的 v$version 一致。" }
-      - name: 构建并发布 GitHub Release
-        run: pnpm run release
+      - name: 构建 Windows 安装包
+        run: pnpm run dist:win
+
+      - name: 上传完整 GitHub Release
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $installer = Get-ChildItem -LiteralPath release -Filter '*.exe' -File | Select-Object -First 1
+          $blockmap = Get-ChildItem -LiteralPath release -Filter '*.exe.blockmap' -File | Select-Object -First 1
+          $manifest = Join-Path $PWD 'release/latest.yml'
+
+          if (-not $installer -or -not $blockmap -or -not (Test-Path -LiteralPath $manifest)) {
+            throw '构建产物不完整：必须包含 .exe、.exe.blockmap 和 latest.yml。'
+          }
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $installer.FullName $blockmap.FullName $manifest --clobber
+          } else {
+            gh release create $tag $installer.FullName $blockmap.FullName $manifest --target "${{ github.sha }}" --title "金蝶幻想 $tag" --generate-notes
+          }
