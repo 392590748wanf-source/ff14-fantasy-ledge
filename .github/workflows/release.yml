@@ -33,22 +33,14 @@ jobs:
         run: pnpm run dist:win
 
       - name: 上传完整 GitHub Release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ github.ref_name }}"
-          $installer = Get-ChildItem -LiteralPath release -Filter '*.exe' -File | Select-Object -First 1
-          $blockmap = Get-ChildItem -LiteralPath release -Filter '*.exe.blockmap' -File | Select-Object -First 1
-          $manifest = Join-Path $PWD 'release/latest.yml'
-
-          if (-not $installer -or -not $blockmap -or -not (Test-Path -LiteralPath $manifest)) {
-            throw '构建产物不完整：必须包含 .exe、.exe.blockmap 和 latest.yml。'
-          }
-
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $installer.FullName $blockmap.FullName $manifest --clobber
-          } else {
-            gh release create $tag $installer.FullName $blockmap.FullName $manifest --target "${{ github.sha }}" --title "金蝶幻想 $tag" --generate-notes
-          }
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: 金蝶幻想 ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
