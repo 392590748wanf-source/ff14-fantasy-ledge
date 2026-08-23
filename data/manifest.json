@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "version": "2026.08.23.1",
-  "publishedAt": "2026-08-23T00:00:00.000Z",
+  "version": "2026.08.23.2",
+  "publishedAt": "2026-08-23T12:00:00.000Z",
   "bundle": {
     "path": "data/data-bundle.json",
-    "sha256": "c551627953ada5d0b6b291b132de93d63ea080b22a3428728895b41ebbea669c",
+    "sha256": "d2be574399102353a7fb2de0f069e0efce959a01e2407f7ba5939c78f4edac65",
     "bytes": 410873
   }
 }

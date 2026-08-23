@@ -742,7 +742,7 @@ window.addEventListener('load', async () => {
           <button id="submarine-toggle" aria-expanded="false">潜水艇售卖 <span class="nav-caret">⌄</span></button>
           <button id="guide-toggle" aria-expanded="false">材料指导价 <span class="nav-caret">⌄</span></button>
         </nav>
-        <div class="app-save-state">本地数据已保存</div><button id="backup-toggle" class="app-utility-button" type="button">数据备份</button>
+        <div class="app-save-state">本地数据已保存</div><button id="backup-toggle" class="app-utility-button" type="button">数据与更新</button>
       </header>
       <div class="app-contextbar" aria-label="当前页面导航">
         <div id="equipment-subnav" class="context-nav subnav equipment-type-nav"><button data-equipment-category="combat">战职装备</button><button data-equipment-category="gathering">生产采集装备</button></div>

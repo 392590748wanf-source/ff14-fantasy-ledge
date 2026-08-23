@@ -29,12 +29,12 @@ pnpm run dist:win
 1. 修改配方、潜水艇、材料来源或雇员资料后，更新 `data/version.json` 的资料版本和发布时间。
 2. 执行 `pnpm data:build` 生成 `data/data-bundle.json` 与 `data/manifest.json`。
 3. 执行 `pnpm data:check`，提交资料文件并推送 `main`。
-4. Cloudflare Pages 完成部署后，客户端用户在“数据备份 → 资料版本 → 重新检测”中确认下载并重载。
+4. Cloudflare Pages 完成部署后，客户端用户在“数据与更新 → 资料版本 → 重新检测”中确认下载并重载。
 
 资料包发布至 `https://ff14-fantasy-ledge.pages.dev/data/manifest.json`。资料更新只影响后续配方展示与成本预估，不会回写历史采购、制作或销售成本。
 
 ## 数据迁移与备份
 
-网页与客户端的本地存储彼此独立。先在网页的“数据备份”中导出 JSON，再在客户端的“数据备份”中导入。客户端升级会保留用户目录中的账本数据；跨设备仍应通过 JSON 导出、导入迁移。
+网页与客户端的本地存储彼此独立。先在网页的“数据与更新”中导出 JSON，再在客户端的“数据与更新”中导入。客户端升级会保留用户目录中的账本数据；跨设备仍应通过 JSON 导出、导入迁移。
 
 不要把导出的账本 JSON、GitHub Token 或任何密钥提交到公开仓库。
