@@ -10,5 +10,8 @@ ff14-fantasy-backup*.json
 
 # 本机与依赖文件
 node_modules/
+.pnpm-store/
+release/
+dist/
 .DS_Store
 Thumbs.db

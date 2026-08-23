@@ -1,0 +1,63 @@
+{
+  "name": "ff14-fantasy-ledge",
+  "productName": "金蝶幻想",
+  "version": "1.0.0",
+  "packageManager": "pnpm@11.19.0",
+  "description": "FF14 装备与潜水艇成本、库存及销售利润账本",
+  "author": "392590748wanf-source",
+  "main": "electron/main.cjs",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check fantasy.js && node --check electron/main.cjs && node --check electron/preload.cjs",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "release": "electron-builder --win nsis --x64 --publish always"
+  },
+  "devDependencies": {
+    "electron": "^37.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "build": {
+    "appId": "com.ff14.fantasy.ledger",
+    "productName": "金蝶幻想",
+    "artifactName": "金蝶幻想-Setup-${version}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "**/*",
+      "!release{,/**}",
+      "!tools{,/**}",
+      "!*.md"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "金蝶幻想"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "392590748wanf-source",
+        "repo": "ff14-fantasy-ledge",
+        "releaseType": "release"
+      }
+    ]
+  }
+}
