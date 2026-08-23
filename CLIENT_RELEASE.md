@@ -10,7 +10,7 @@ pnpm start
 pnpm run dist:win
 ```
 
-安装包会生成在 `release/` 目录。首版只构建 Windows x64 的 NSIS 安装程序。
+安装包会生成在 `release/` 目录，例如 `ff14-fantasy-ledge-setup-1.0.1.exe`。首版只构建 Windows x64 的 NSIS 安装程序；安装向导和桌面快捷方式仍显示“金蝶幻想”。
 
 ## 发布新版本
 
