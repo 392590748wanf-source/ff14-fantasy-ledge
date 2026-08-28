@@ -13,12 +13,13 @@ window.addEventListener('load', async () => {
     hqHelperFallback: 'FF14_HQHELPER_FALLBACK',
     retainerData: 'FF14_RETAINER_DATA',
     materialSources: 'FF14_MATERIAL_SOURCES',
-    exchangeSources: 'FF14_EXCHANGE_SOURCES'
+    exchangeSources: 'FF14_EXCHANGE_SOURCES',
+    craftScrips: 'FF14_CRAFT_SCRIPS'
   };
   Object.entries(datasetGlobals).forEach(([key, globalName]) => {
     if (externalDatasets[key] && typeof externalDatasets[key] === 'object') window[globalName] = externalDatasets[key];
   });
-  const state = { page: 'home', type: null, expanded: false, submarineExpanded: false, submarineView: 'summary', submarinePartsOpen: false, guideView: 'crystals', guideExpanded: false, selectedMaterial: null, basicCategory: 'equipment', otherSearch: '', basicMaterialSearch: '', equipmentGroups: {}, equipmentSections: {}, guideCategories: {}, marketRefreshing: false, marketMessage: '', equipmentCombatTier: '770', equipmentGatheringTier: '750', equipmentSummaryTiers: { combat: '770', gathering: '750' }, submarineGroups: {}, itemIndexLoading: false, itemIconIndexLoading: false, garlandIconLoading: new Set() };
+  const state = { page: 'home', type: null, expanded: false, submarineExpanded: false, submarineView: 'summary', submarinePartsOpen: false, guideView: 'crystals', guideExpanded: false, selectedMaterial: null, basicCategory: 'equipment', craftScripTicket: 'orange', craftScripManualEditingId: null, otherSearch: '', basicMaterialSearch: '', equipmentGroups: {}, equipmentSections: {}, guideCategories: {}, marketRefreshing: false, marketMessage: '', equipmentCombatTier: '770', equipmentGatheringTier: '750', equipmentSummaryTiers: { combat: '770', gathering: '750' }, submarineGroups: {}, itemIndexLoading: false, itemIconIndexLoading: false, garlandIconLoading: new Set() };
   const data = JSON.parse(localStorage.getItem('ff14-770') || '{"m":[],"r":[],"p":{},"l":[]}');
   const mergeMaterials = (defaults, saved) => {
     const savedById = new Map((saved || []).map(item => [String(item.id), item]));
@@ -44,6 +45,9 @@ window.addEventListener('load', async () => {
   const submarineTicketSettings = JSON.parse(localStorage.getItem('ff14-submarine-ticket-settings') || '{"defaultUnitCost":80}');
   if (!(Number(submarineTicketSettings.defaultUnitCost) > 0)) submarineTicketSettings.defaultUnitCost = 80;
   const otherMaterialIds = JSON.parse(localStorage.getItem('ff14-other-material-ids') || '[]');
+  const craftScripManualStorageKey = 'ff14-craft-scrip-manual-exchanges';
+  let craftScripManualExchanges = JSON.parse(localStorage.getItem(craftScripManualStorageKey) || '[]');
+  if (!Array.isArray(craftScripManualExchanges)) craftScripManualExchanges = [];
   const submarineStocks = JSON.parse(localStorage.getItem('ff14-submarine-stocks') || '{}');
   const submarineSales = JSON.parse(localStorage.getItem('ff14-submarine-sales') || '[]');
   const submarineSuiteSales = JSON.parse(localStorage.getItem('ff14-submarine-suite-sales') || '[]');
@@ -96,6 +100,9 @@ window.addEventListener('load', async () => {
   const chinaDateFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' });
   const money = n => moneyFormatter.format(Math.round(n || 0)) + ' G';
   const marketPriceLabel = material => {
+    if (material?.marketExcluded) {
+      return material.marketExcludedReason === 'collectable' ? '不可交易，不查询市场价' : '不查询市场价';
+    }
     if (Number(material?.mp) > 0) {
       if (material.marketStatus === 'listing-weighted') {
         return money(material.mp);
@@ -123,6 +130,7 @@ window.addEventListener('load', async () => {
     localStorage.setItem('ff14-material-state', JSON.stringify(data.m));
     localStorage.setItem('ff14-material-purchases', JSON.stringify(purchases));
     localStorage.setItem('ff14-other-material-ids', JSON.stringify(otherMaterialIds));
+    localStorage.setItem(craftScripManualStorageKey, JSON.stringify(craftScripManualExchanges));
     localStorage.setItem('ff14-submarine-stocks', JSON.stringify(submarineStocks));
     localStorage.setItem('ff14-submarine-sales', JSON.stringify(submarineSales));
     localStorage.setItem('ff14-submarine-suite-sales', JSON.stringify(submarineSuiteSales));
@@ -134,7 +142,7 @@ window.addEventListener('load', async () => {
     'ff14-770', 'ff14-material-state', 'ff14-material-purchases', 'ff14-fantasy-prices',
     'ff14-submarine-ticket-settings', 'ff14-other-material-ids', 'ff14-submarine-stocks',
     'ff14-submarine-sales', 'ff14-submarine-suite-sales', 'ff14-submarine-operations',
-    'ff14-submarine-npc-materials', 'ff14-submarine-suites', 'ff14-market-refreshed-at'
+    'ff14-submarine-npc-materials', 'ff14-submarine-suites', craftScripManualStorageKey, 'ff14-market-refreshed-at'
   ];
   const backupFormat = 'ff14-fantasy-backup';
   const createBackup = () => ({
@@ -207,7 +215,8 @@ window.addEventListener('load', async () => {
   const garlandIconIndex = hqHelperFallback.icons || {};
   const itemIconId = uid => {
     const key = String(uid);
-    const direct = Number(garlandIconIndex[key] || garlandIconCache[key] || 0);
+    const craftScripIcon = Number(window.FF14_CRAFT_SCRIPS?.items?.[key]?.i || window.FF14_CRAFT_SCRIP_DATA?.items?.[key]?.i || 0);
+    const direct = Number(garlandIconIndex[key] || garlandIconCache[key] || craftScripIcon || 0);
     const indexed = Number(window.FF14_ITEM_ICON_INDEX?.[key] || 0);
     return direct > 0 ? direct : indexed > 0 ? indexed : 0;
   };
@@ -245,6 +254,24 @@ window.addEventListener('load', async () => {
   const retainerData = window.FF14_RETAINER_DATA || {};
   const materialSources = window.FF14_MATERIAL_SOURCES || {};
   const exchangeSources = window.FF14_EXCHANGE_SOURCES || { carriers: {}, routes: [] };
+  const craftScrips = window.FF14_CRAFT_SCRIPS || { tickets: {}, exchanges: [], collectables: [], items: {}, recipes: {} };
+  const normalizeCraftScripExchange = (route, manual = false) => {
+    const itemId = String(route?.itemId ?? route?.uid ?? '').trim();
+    const ticket = String(route?.ticket || '');
+    const ticketCost = Number(route?.ticketCost), outputQuantity = Number(route?.outputQuantity ?? 1);
+    if (!/^\d+$/.test(itemId) || !['orange', 'purple'].includes(ticket) || !(ticketCost > 0) || !(outputQuantity > 0)) return null;
+    return { ...route, itemId, ticket, ticketCost, outputQuantity, manual: Boolean(manual || route.manual), active: route.active !== false };
+  };
+  const craftScripExchanges = () => {
+    const byRoute = new Map();
+    (craftScrips.exchanges || []).map(route => normalizeCraftScripExchange(route)).filter(Boolean)
+      .forEach(route => byRoute.set(`${route.itemId}:${route.ticket}`, route));
+    craftScripManualExchanges.map(route => normalizeCraftScripExchange(route, true)).filter(Boolean)
+      .forEach(route => byRoute.set(`${route.itemId}:${route.ticket}`, route));
+    return [...byRoute.values()].filter(route => route.active);
+  };
+  const craftScripTicket = key => craftScrips.tickets?.[key] || { label: key };
+  const craftScripTicketLabel = key => craftScripTicket(key).label || key;
   let npcMaterialIndex = null;
   let npcComparisonReady = false;
   const npcComparisonCache = new Map();
@@ -310,6 +337,35 @@ window.addEventListener('load', async () => {
     if (!data.m.some(material => String(material.uid) === String(uid))) data.m.push({ id: 'exchange-' + uid, n: spec.name, uid: String(uid), c: 0, mp: 0, u: '', exchangeCarrier: true });
   });
   ensureExchangeMaterials();
+  const craftScripItems = craftScrips.items || {};
+  const craftScripCollectibleIds = new Set((craftScrips.collectables || []).map(spec => String(spec.itemId)));
+  const ensureCraftScripMaterials = () => {
+    const ids = new Set([
+      ...Object.keys(craftScripItems),
+      ...(craftScrips.collectables || []).map(spec => String(spec.itemId)),
+      ...craftScripExchanges().map(route => String(route.itemId))
+    ]);
+    ids.forEach(uid => {
+      const item = craftScripItems[uid] || hqHelperItems[uid];
+      const route = craftScripExchanges().find(entry => String(entry.itemId) === uid);
+      let material = data.m.find(row => String(row.uid) === uid);
+      if (!material) {
+        material = { id: 'craft-scrip-' + uid, n: item?.n || materialSources[uid]?.name || route?.name || `物品 ${uid}`, uid, c: 0, mp: 0, u: '', craftScripMaterial: true, iconId: item?.i || 0 };
+        data.m.push(material);
+      }
+      if (craftScripCollectibleIds.has(uid)) {
+        // 清理早期客户端留下的市场快照，避免不可交易收藏品被误当成可采购材料。
+        material.marketExcluded = true;
+        material.marketExcludedReason = 'collectable';
+        material.mp = 0;
+        material.u = '';
+        delete material.marketStatus;
+        delete material.marketSampleQuantity;
+        delete material.marketSampleTarget;
+      }
+    });
+  };
+  ensureCraftScripMaterials();
   // 物品主数据由装备/潜水艇配方索引提供；来源索引不能单独注入推荐材料。
   const purchaseRows = material => purchases.filter(row => row.materialId === material.id);
   const purchaseAverage = material => {
@@ -416,11 +472,11 @@ window.addEventListener('load', async () => {
   ];
   const equipmentCategoryFor = type => equipmentGradeCatalog.find(item => item.id === String(type))?.category || 'combat';
   const availableEquipmentGrades = category => equipmentGradeCatalog.filter(item => item.category === category && tableRows(item.id).some(row => !row.header));
-  const graphRecipes = { ...(baseMaterials.g || {}), ...(submarineData.g || {}) };
+  const graphRecipes = { ...(baseMaterials.g || {}), ...(submarineData.g || {}), ...(craftScrips.recipes || {}) };
   const recipeCandidatesFor = uid => graphRecipes[String(uid)]?.length
     ? graphRecipes[String(uid)]
     : (hqHelperRecipes[String(uid)] || []);
-  const recipeSourceFor = uid => graphRecipes[String(uid)]?.length ? 'primary' : (hqHelperRecipes[String(uid)]?.length ? 'hqhelper' : 'missing');
+  const recipeSourceFor = uid => graphRecipes[String(uid)]?.length ? (craftScrips.recipes?.[String(uid)]?.length ? 'garland' : 'primary') : (hqHelperRecipes[String(uid)]?.length ? 'hqhelper' : 'missing');
   const hqHelperAudit = hqHelperFallback.audit || {};
   window.FF14_HQHELPER_AUDIT = {
     ...hqHelperAudit,
@@ -455,9 +511,9 @@ window.addEventListener('load', async () => {
     const uid = String(material?.uid || '');
     if (voucherCarrierIds.has(uid)) return '薰衣草/风茄兑换';
     // 此函数在启动期就会被 NPC 成本初始化调用，不能依赖后面才声明的分类辅助函数。
-    const source = materialSources[uid] || {}, kinds = source.nativeSubmarineKinds || source.submarineKinds || [];
+    const source = materialSources[uid] || {}, kinds = [source.verified?.submarine, ...(source.nativeSubmarineKinds || source.submarineKinds || [])].filter(Boolean);
     const priority = ['NPC 购买材料', '常规采集品', '军票兑换', '薰衣草/风茄兑换', '天穹票兑换', '限时采集品', '怪物掉落', '潜水艇携带材料'];
-    const baseKind = (source.equipmentKinds || []).includes('怪物掉落') ? '怪物掉落' : baseMaterials.k?.[uid] || '常规采集品';
+    const baseKind = source.verified?.equipment || source.equipmentKinds?.[0] || baseMaterials.k?.[uid] || '常规采集品';
     const fallback = baseKind === '神典石材料' ? '军票兑换' : baseKind === '灵砂' ? '限时采集品' : baseKind;
     return priority.find(kind => kinds.includes(kind)) || fallback;
   };
@@ -638,7 +694,7 @@ window.addEventListener('load', async () => {
     if (!isSelfCraftChoice && direct.price > 0 && (!node || recipeCost == null || direct.price <= recipeCost)) return null;
     return node;
   };
-  const materialName = uid => data.m.find(item => String(item.uid) === String(uid))?.n || baseMaterials.n?.[String(uid)] || submarineData.n?.[String(uid)] || `未知材料 ${uid}`;
+  const materialName = uid => data.m.find(item => String(item.uid) === String(uid))?.n || craftScripItems[String(uid)]?.n || baseMaterials.n?.[String(uid)] || submarineData.n?.[String(uid)] || `未知材料 ${uid}`;
   const nodeKey = (uid, node) => node ? `${uid}@${node.id || node.j}` : `leaf@${uid}`;
   // 统一生产计划：同一半成品先合并需求，再按产出向上取整；每个视图都从该计划取数。
   function calculateProductionPlan(bundle) {
@@ -806,8 +862,9 @@ window.addEventListener('load', async () => {
     <dialog id="auto-sale-dialog"><form id="auto-sale-form" class="modal"><h2>确认装备出售</h2><div id="auto-sale-summary" class="card" style="box-shadow:none;background:#f3f8f9"></div><label>实际成交单价<input id="auto-sale-price" type="number" min="0.01" step="1" required></label><div class="modal-actions"><button type="button" class="btn secondary" data-close="auto-sale-dialog">取消</button><button class="btn">确认售卖</button></div></form></dialog>
     <dialog id="bundle-detail-dialog"><div class="detail-modal"><div class="header"><div><div id="bundle-detail-meta" class="meta"></div><h2 id="bundle-detail-title">装备详情</h2><div class="sub">成品仅作为清单显示；成本仅统计递归展开后的基础制作素材。</div></div><button class="btn secondary" data-close="bundle-detail-dialog">关闭</button></div><div id="bundle-detail-content"></div></div></dialog>
     <dialog id="recipe-reference-dialog"><div class="modal price-form"><div class="header"><div><div id="recipe-reference-meta" class="meta">潜水艇配方参考</div><h2 id="recipe-reference-title">制作配方</h2><div class="sub">此处仅核对官方配方结构，不参与当前市场 / 兑换成本核算。</div></div><button class="btn secondary" data-close="recipe-reference-dialog">关闭</button></div><div id="recipe-reference-content"></div></div></dialog>
-    <dialog id="purchase-dialog"><form id="purchase-form" class="modal price-form"><h2 id="purchase-title">记录采购</h2><label>日期<input id="purchase-date" type="date"></label><div id="purchase-voucher-summary" class="card" style="box-shadow:none;background:#f3f8f9" hidden></div><label id="purchase-kind-label">采购方式<select id="purchase-kind"></select></label><div id="purchase-direct-fields"><label>购买数量<input id="purchase-quantity" type="number" min="0.01" step="0.01"></label><label>税率<select id="purchase-tax"><option value="0.05">5%</option><option value="0">0%</option></select></label><label>单价<input id="purchase-unit" type="number" min="0" step="0.01"></label><label>合价（含税）<input id="purchase-total" type="number" min="0" step="0.01"></label></div><div id="purchase-exchange-fields" hidden><div id="purchase-exchange-note" class="sub"></div><label>兑换次数<input id="purchase-exchange-turns" type="number" min="1" step="1"></label><label id="purchase-source-price-label">凭证单价<input id="purchase-source-price" type="number" min="0" step="0.01"></label><div id="purchase-exchange-summary" class="card" style="box-shadow:none;background:#f3f8f9"></div></div><div class="modal-actions"><button class="btn">保存采购</button></div></form></dialog>
+    <dialog id="purchase-dialog"><form id="purchase-form" class="modal price-form" novalidate><h2 id="purchase-title">记录采购</h2><label>日期<input id="purchase-date" type="date"></label><div id="purchase-voucher-summary" class="card" style="box-shadow:none;background:#f3f8f9" hidden></div><label id="purchase-kind-label">采购方式<select id="purchase-kind"></select></label><div id="purchase-kind-hint" class="sub" style="margin:-4px 0 10px" hidden></div><div id="purchase-direct-fields"><label>购买数量<input id="purchase-quantity" type="number" min="0" step="any"></label><label>税率<select id="purchase-tax"><option value="0.05">5%</option><option value="0">0%</option></select></label><label>单价<input id="purchase-unit" type="text" inputmode="decimal" autocomplete="off"></label><label>合价（含税）<input id="purchase-total" type="text" inputmode="decimal" autocomplete="off"></label></div><div id="purchase-exchange-fields" hidden><div id="purchase-exchange-note" class="sub"></div><label>兑换次数<input id="purchase-exchange-turns" type="number" min="0" step="any"></label><label id="purchase-source-price-label">凭证单价<input id="purchase-source-price" type="text" inputmode="decimal" autocomplete="off"></label><div id="purchase-exchange-summary" class="card" style="box-shadow:none;background:#f3f8f9"></div></div><p id="purchase-error" role="alert" style="margin:12px 0 0;color:#b5423a" hidden></p><div class="modal-actions"><button class="btn">保存采购</button></div></form></dialog>
     <dialog id="purchase-manager-dialog"><div class="modal"><div class="header"><div><div id="purchase-manager-meta" class="meta">材料采购</div><h2 id="purchase-manager-title">采购价格</h2><div id="purchase-manager-average" class="sub"></div></div><div><button id="purchase-manager-add" class="btn">+ 记录采购</button> <button class="btn secondary" data-close="purchase-manager-dialog">关闭</button></div></div><div id="purchase-manager-content"></div></div></dialog>
+    <dialog id="craft-scrip-manual-dialog"><form id="craft-scrip-manual-form" class="modal price-form" novalidate><div class="header"><div><div class="meta">材料指导价 &gt; 工票材料</div><h2 id="craft-scrip-manual-title">维护本机工票兑换材料</h2><div class="sub">仅保存到本机配置，不会写入共享资料包，也不会影响其他用户。</div></div><button type="button" class="btn secondary" data-close="craft-scrip-manual-dialog">关闭</button></div><input id="craft-scrip-manual-id" type="hidden"><label>材料名称或物品 ID<input id="craft-scrip-manual-material" autocomplete="off" placeholder="例如 高浓缩炼金药 或 44848" required></label><div id="craft-scrip-manual-resolved" class="sub"></div><label>票种<select id="craft-scrip-manual-ticket"><option value="orange">巧手橙票</option><option value="purple">巧手紫票</option></select></label><label>所需工票<input id="craft-scrip-manual-cost" type="number" min="1" step="1" required></label><label>每次获得数量<input id="craft-scrip-manual-output" type="number" min="1" step="1" value="1" required></label><label>来源说明<input id="craft-scrip-manual-source" placeholder="例如 NPC 兑换 / 资料链接"></label><p id="craft-scrip-manual-error" role="alert" style="margin:12px 0 0;color:#b5423a" hidden></p><div class="modal-actions"><button type="button" class="btn secondary" data-close="craft-scrip-manual-dialog">取消</button><button class="btn">保存本机配置</button></div></form></dialog>
     <dialog id="submarine-sale-dialog"><form id="submarine-sale-form" class="modal"><h2 id="submarine-sale-title">确认潜水艇部件售卖</h2><div id="submarine-sale-summary" class="card" style="box-shadow:none;background:#f3f8f9"></div><label>出售数量<input id="submarine-sale-quantity" type="number" min="1" step="1" value="1"></label><label>实际单价<input id="submarine-sale-price" type="number" min="0.01" step="1" required></label><div class="modal-actions"><button type="button" class="btn secondary" data-close="submarine-sale-dialog">取消</button><button class="btn">确认售卖</button></div></form></dialog>
     <dialog id="submarine-suite-sale-dialog"><form id="submarine-suite-sale-form" class="modal"><h2 id="submarine-suite-sale-title">确认整套售卖</h2><div id="submarine-suite-sale-summary" class="card" style="box-shadow:none;background:#f3f8f9"></div><label>出售套数<input id="submarine-suite-sale-quantity" type="number" min="1" step="1" value="1"></label><label>实际单套成交价<input id="submarine-suite-sale-price" type="number" min="0.01" step="1" required></label><div class="modal-actions"><button type="button" class="btn secondary" data-close="submarine-suite-sale-dialog">取消</button><button class="btn">确认整套售卖</button></div></form></dialog>
     <dialog id="submarine-craft-dialog"><form id="submarine-craft-form" class="modal"><h2 id="submarine-craft-title">制作入库</h2><div id="submarine-craft-summary" class="card" style="box-shadow:none;background:#f3f8f9"></div><label id="submarine-craft-quantity-label">制作数量<input id="submarine-craft-quantity" type="number" min="1" step="1" value="1"></label><div class="modal-actions"><button type="button" class="btn secondary" data-close="submarine-craft-dialog">取消</button><button class="btn">确认制作入库</button></div></form></dialog>
@@ -990,8 +1047,58 @@ window.addEventListener('load', async () => {
     if (state.guideView === 'crystals') return data.m.filter(isCrystal);
     if (state.basicCategory === 'equipment') return equipmentBaseMaterials();
     if (state.basicCategory === 'submarine') return submarineBaseMaterials().filter(showSubmarineGuideMaterial);
+    if (state.basicCategory === 'scrip') return craftScripExchangeMaterials(state.craftScripTicket);
     return data.m.filter(material => otherMaterialIds.includes(String(material.uid)));
   };
+  const craftScripRoutesFor = (uid, ticket = null) => craftScripExchanges().filter(route => String(route.itemId) === String(uid) && (!ticket || route.ticket === ticket));
+  const craftScripExchangeMaterials = ticket => {
+    const ids = new Set(craftScripExchanges().filter(route => !ticket || route.ticket === ticket).map(route => String(route.itemId)));
+    return data.m.filter(material => ids.has(String(material.uid))).sort((left, right) => Number(left.uid) - Number(right.uid));
+  };
+  const craftScripManualRoutes = () => craftScripManualExchanges.map(route => normalizeCraftScripExchange(route, true)).filter(Boolean);
+  const findCraftScripMaterial = value => {
+    const query = String(value || '').trim();
+    if (!query) return null;
+    const lower = query.toLowerCase();
+    const material = data.m.find(item => String(item.uid) === query || item.n.toLowerCase() === lower);
+    if (material) return material;
+    const indexed = itemIndex().find(([uid, name]) => String(uid) === query || String(name).toLowerCase() === lower);
+    return indexed ? { uid: String(indexed[0]), n: indexed[1] } : null;
+  };
+  const refreshCraftScripConfig = () => {
+    ensureCraftScripMaterials();
+    invalidatePlans();
+    invalidateGuideIndexes();
+    save();
+  };
+  const craftJobName = recipe => {
+    const raw = Number(recipe?.j);
+    const key = Number.isFinite(raw) && raw < 9 ? raw + 9 : raw;
+    return jobNames['职业 ' + key] || '待核验职业';
+  };
+  const craftScripCollectibleCandidates = ticket => {
+    const minimumLevel = Number(craftScrips.tickets?.[ticket]?.minimumCollectableLevel || 0);
+    return (craftScrips.collectables || []).filter(spec => spec.ticket === ticket && spec.active !== false &&
+      (!minimumLevel || Number(spec.level || 0) >= minimumLevel) && (!spec.scope || spec.scope === 'regular' || spec.scope === '常规'));
+  };
+  const craftScripCollectibleCost = spec => {
+    const recipe = recipeCandidatesFor(spec.itemId)[0];
+    const rows = recipe ? submarineCraftInputBreakdown(spec.itemId) : [];
+    const missing = [];
+    if (!recipe) missing.push('缺少配方');
+    if (!Number(spec.maxPayout || 0)) missing.push('缺少最高档回报');
+    if (recipe && !rows.length) missing.push('缺少制作素材');
+    if (rows.some(row => !(Number(row.unit) > 0))) missing.push('等待材料价格');
+    const batchCost = !missing.length ? rows.reduce((sum, row) => sum + Number(row.batchTotal), 0) : null;
+    const yieldCount = Math.max(1, Number(spec.outputQuantity || spec.yield || recipe?.y || 1));
+    const payout = Number(spec.maxPayout || 0);
+    const unitCost = batchCost == null ? null : batchCost / yieldCount;
+    return { ...spec, recipe, rows, batchCost, yieldCount, unitCost, payout, perScrip: unitCost != null && payout > 0 ? unitCost / payout : null, ready: !missing.length, reason: missing.join('；'), job: spec.job || craftJobName(recipe) };
+  };
+  const recommendedCraftScripCollectible = ticket => craftScripCollectibleCandidates(ticket)
+    .map(craftScripCollectibleCost)
+    .filter(spec => spec.ready && Number(spec.perScrip) > 0)
+    .sort((left, right) => left.perScrip - right.perScrip)[0] || null;
   const equipmentBaseMaterials = () => {
     const cacheKey = [state.equipmentCombatTier, state.equipmentGatheringTier].join('|');
     const cached = guideIndexCache.equipment.get(cacheKey);
@@ -1037,7 +1144,17 @@ window.addEventListener('load', async () => {
     return warnings;
   };
   const materialSourceAudit = sourceScopeAudit();
-  window.FF14_MATERIAL_SOURCE_AUDIT = materialSourceAudit;
+  const verifiedClassificationAudit = () => {
+    const equipment = equipmentCatalogIds(), submarine = submarineCatalogIds();
+    const entries = [...new Set([...equipment, ...submarine])].map(uid => {
+      const source = materialSources[uid] || {}, fallback = baseMaterials.k?.[uid] || '常规采集品';
+      const equipmentKind = source.verified?.equipment || source.equipmentKinds?.[0] || fallback;
+      const submarineKind = source.verified?.submarine || source.nativeSubmarineKinds?.[0] || source.submarineKinds?.[0] || (equipmentKind === '神典石材料' ? '军票兑换' : equipmentKind === '灵砂' ? '限时采集品' : equipmentKind);
+      return { uid, name: source.name || data.m.find(item => String(item.uid) === uid)?.n || uid, equipment: equipment.has(uid) ? equipmentKind : null, submarine: submarine.has(uid) ? submarineKind : null, verified: Boolean(source.verified), sources: source.verified?.sources || [], status: source.verified ? '已核验' : '待核验' };
+    });
+    return { scopeWarnings: materialSourceAudit, verified: entries.filter(entry => entry.verified), pending: entries.filter(entry => !entry.verified) };
+  };
+  window.FF14_MATERIAL_SOURCE_AUDIT = verifiedClassificationAudit();
   if (materialSourceAudit.length) console.warn('材料来源索引存在未被配方引用的待维护项：', materialSourceAudit);
   const submarineBaseMaterials = () => {
     const cached = guideIndexCache.submarine;
@@ -1071,15 +1188,20 @@ window.addEventListener('load', async () => {
     const labels = [];
     if (equipmentBaseMaterials().some(item => String(item.uid) === String(material.uid))) labels.push('装备推荐材料');
     if (submarineBaseMaterials().some(item => String(item.uid) === String(material.uid)) || npcCandidate(material)) labels.push('潜水艇推荐材料');
+    if (craftScripRoutesFor(material.uid).length) labels.push('工票材料');
     guideIndexCache.membership.set(uid, labels);
     return labels;
   };
   const sourceKinds = (material, scope) => {
     const source = materialSources[String(material.uid)] || {};
-    return scope === 'equipment' ? source.equipmentKinds || [] : source.nativeSubmarineKinds || source.submarineKinds || [];
+    const verified = source.verified?.[scope];
+    const kinds = scope === 'equipment' ? source.equipmentKinds || [] : source.nativeSubmarineKinds || source.submarineKinds || [];
+    return [verified, ...kinds].filter(Boolean);
   };
   // 分类由同步后的基础素材索引明确给出；旧数据或外部新增材料才回退到常规采集品。
-  const basicKind = material => sourceKinds(material, 'equipment').includes('怪物掉落') ? '怪物掉落' : baseMaterials.k?.[String(material.uid)] || '常规采集品';
+  const basicKind = material => craftScripRoutesFor(material.uid).length
+    ? '能工巧匠工票兑换'
+    : sourceKinds(material, 'equipment')[0] || baseMaterials.k?.[String(material.uid)] || '常规采集品';
   // 潜水艇推荐材料按业务约定的单一主分类显示；同一物品的其它获取途径保留为备注。
   const submarineKindPriority = ['NPC 购买材料', '常规采集品', '军票兑换', '薰衣草/风茄兑换', '天穹票兑换', '限时采集品', '怪物掉落', '潜水艇携带材料'];
   const submarineKind = material => {
@@ -1102,6 +1224,7 @@ window.addEventListener('load', async () => {
     const ranges = [
       { key: 'equipment', label: '装备推荐材料', materials: equipmentBaseMaterials(), kind: basicKind },
       { key: 'submarine', label: '潜水艇推荐材料', materials: submarineBaseMaterials().filter(showSubmarineGuideMaterial), kind: submarineGuideKind },
+      { key: 'scrip', label: '工票材料', materials: craftScripExchangeMaterials(), kind: material => craftScripRoutesFor(material.uid).map(route => craftScripTicketLabel(route.ticket)).join('／') },
       { key: 'other', label: '其他材料', materials: data.m.filter(material => otherMaterialIds.includes(String(material.uid))), kind: () => '已加入的其他材料' }
     ];
     return ranges.flatMap(range => range.materials
@@ -1111,11 +1234,13 @@ window.addEventListener('load', async () => {
   };
   const basicSearchCategoryKey = result => {
     if (result.scope === 'other') return '';
+    if (result.scope === 'scrip') return '';
     if (result.scope === 'submarine' && result.kind === 'NPC 购买材料') return 'submarine-npc';
     return result.scope + '-' + result.kind;
   };
   const jumpToBasicMaterial = result => {
     state.basicCategory = result.scope;
+    if (result.scope === 'scrip') state.craftScripTicket = craftScripRoutesFor(result.material.uid)[0]?.ticket || state.craftScripTicket;
     const categoryKey = basicSearchCategoryKey(result);
     if (categoryKey) state.guideCategories[categoryKey] = true;
     state.basicMaterialSearch = '';
@@ -1137,7 +1262,7 @@ window.addEventListener('load', async () => {
   };
   async function refreshMarket(manual = false, requestedMaterials = null) {
     // NPC 材料也保留市场快照，才能在来源比价中与市场采购公平比较。
-    const materials = (requestedMaterials || data.m).filter(material => material?.uid && !material.exchangeTicket && !isNonMarketSubmarineNode(material));
+    const materials = (requestedMaterials || data.m).filter(material => material?.uid && !material.exchangeTicket && !material.marketExcluded && !isNonMarketSubmarineNode(material));
     if (!materials.length) return;
     if (window.materialRefreshRunning) return;
     window.materialRefreshRunning = true;
@@ -1225,6 +1350,7 @@ window.addEventListener('load', async () => {
     if (state.guideView !== 'basic') return [];
     const materials = guideMaterials();
     if (state.basicCategory === 'other') return materials;
+    if (state.basicCategory === 'scrip') return materials;
     const prefix = state.basicCategory + '-';
     const openKinds = Object.entries(state.guideCategories).filter(([key, open]) => open && key.startsWith(prefix)).map(([key]) => key.slice(prefix.length));
     const visible = !openKinds.length ? [] : materials.filter(material => {
@@ -1336,10 +1462,46 @@ window.addEventListener('load', async () => {
       return `<tr class="${npc ? 'npc-row' : ''}" data-guide-material-row="${state.basicCategory}:${material.uid}"><td class="label">${label}</td><td>${kind}${submarine && choice.unavailable ? '<small class="meta"> · 待补价</small>' : ''}</td><td>${membershipTags(material)}</td><td>${marketPriceLabel(material)}</td><td>${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</td><td>${material.u || '—'}</td><td><button class="btn secondary" data-purchase="${material.id}">采购价格</button></td></tr>`;
     }).join('') || '<tr><td colspan="7" class="empty">暂无材料</td></tr>'}</tbody></table></div>`;
     const npcTable = list => `<div class="table-wrap"><table class="ledger"><thead><tr><th>材料</th><th>NPC 售卖价</th><th>采购平均价</th><th>自制价</th><th>购买来源</th><th>记录采购</th></tr></thead><tbody>${list.map(material => { const spec = npcCandidate(material), comparison = npcComparison(material.uid), purchase = purchaseAverage(material), craftable = comparison?.hasCraftRoute, choice = submarineSourceChoice(material), recommendation = recommendationTag(choice), name = itemLabelMarkup(material.uid, material.n); const label = hasComparableSubmarineSources(material) ? `<button class="bundle-link" data-source-detail="${material.uid}">${recommendation}${name}</button>` : `${recommendation}${name}`; return `<tr class="npc-row" data-guide-material-row="submarine:${material.uid}"><td class="label">${label}</td><td>${money(spec?.price)}</td><td>${purchase > 0 ? money(purchase) : '未采购'}</td><td>${craftable ? (comparison.self == null ? '等待市场价' : money(comparison.self)) : '—'}</td><td>${spec?.source || '—'}</td><td><button class="btn secondary" data-purchase="${material.id}">记录采购</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">暂无 NPC 固定材料</td></tr>'}</tbody></table></div>`;
-    const categoryTables = ['常规采集品', '限时采集品', '灵砂', '神典石材料', '怪物掉落'].map(kind => {
+    const categoryTables = ['常规采集品', '限时采集品', '灵砂', '神典石材料', '怪物掉落', '能工巧匠工票兑换'].map(kind => {
       const list = materials.filter(material => basicKind(material) === kind), key = 'equipment-' + kind;
-      return `<details class="material-category" data-material-category="${key}" ${state.guideCategories[key] ? 'open' : ''}><summary>${kind}<span>${list.length} 项 · 点击展开</span></summary>${state.guideCategories[key] ? materialTable(list) : ''}</details>`;
+      if (kind !== '能工巧匠工票兑换') return `<details class="material-category" data-material-category="${key}" ${state.guideCategories[key] ? 'open' : ''}><summary>${kind}<span>${list.length} 项 · 点击展开</span></summary>${state.guideCategories[key] ? materialTable(list) : ''}</details>`;
+      const sections = ['orange', 'purple'].map(ticket => {
+        const routes = craftScripExchangeMaterials(ticket).filter(material => list.some(item => String(item.uid) === String(material.uid)));
+        const subKey = key + '-' + ticket;
+        return `<details class="craft-scrip-subcategory" data-material-category="${subKey}" ${state.guideCategories[subKey] ? 'open' : ''}><summary>${craftScripTicketLabel(ticket)}<span>${routes.length} 项 · 点击展开</span></summary>${state.guideCategories[subKey] ? materialTable(routes) : ''}</details>`;
+      }).join('');
+      return `<details class="material-category" data-material-category="${key}" ${state.guideCategories[key] ? 'open' : ''}><summary>${kind}<span>${list.length} 项 · 点击展开</span></summary>${state.guideCategories[key] ? `<div class="craft-scrip-subcategories">${sections}</div>` : ''}</details>`;
     }).join('');
+    const craftScripMaterialTable = list => `<div class="table-wrap"><table class="ledger"><thead><tr><th>材料</th><th>票种</th><th>兑换比例</th><th>市场平均价</th><th>采购平均价</th><th>最后刷新</th><th>详情</th></tr></thead><tbody>${list.map(material => {
+      const routes = craftScripRoutesFor(material.uid, state.craftScripTicket);
+      const ratio = routes.map(route => `${craftScripTicketLabel(route.ticket)} ×${route.ticketCost} → ${material.n} ×${route.outputQuantity || 1}`).join('<br>');
+      return `<tr data-guide-material-row="scrip:${material.uid}"><td class="label">${itemLabelMarkup(material.uid, material.n)}</td><td>${routes.map(route => `<span class="scrip-ticket ${route.ticket}">${craftScripTicketLabel(route.ticket)}</span>`).join('')}</td><td class="label">${ratio}</td><td>${marketPriceLabel(material)}</td><td>${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</td><td>${material.u || '—'}</td><td><button class="btn secondary" data-craft-scrip-detail="${material.uid}">查看详情</button></td></tr>`;
+    }).join('') || '<tr><td colspan="7" class="empty">此票种暂无已收录兑换材料。</td></tr>'}</tbody></table></div>`;
+    const craftScripRecommendation = ticket => {
+      const recommendation = recommendedCraftScripCollectible(ticket), label = craftScripTicketLabel(ticket), candidates = craftScripCollectibleCandidates(ticket);
+      if (!recommendation) {
+        const reasons = candidates.map(craftScripCollectibleCost).map(spec => spec.reason).filter(Boolean);
+        const scope = craftScripTicket(ticket).scope || '常规收藏品';
+        return `<article class="craft-scrip-recommendation pending"><div class="meta">${label}最低成本收藏品 · ${scope}</div><strong>${candidates.length ? '等待补价或资料补充' : '等待补充收藏品回报资料'}</strong><p>${reasons.length ? [...new Set(reasons)].join('；') : '资料包会在候选同时具备物品 ID、制作职业、配方、每批产出与最高档回报后，自动按每张票成本排序推荐。'}</p></article>`;
+      }
+      const material = data.m.find(item => String(item.uid) === String(recommendation.itemId));
+      return `<article class="craft-scrip-recommendation"><div class="meta">${label}最低成本收藏品</div><button class="bundle-link" data-craft-collectible-detail="${recommendation.itemId}">${itemLabelMarkup(recommendation.itemId, material?.n || recommendation.name || recommendation.itemId)}</button><dl><div><dt>制作职业</dt><dd>${recommendation.job}</dd></div><div><dt>单件制作成本</dt><dd>${money(recommendation.unitCost)}</dd></div><div><dt>最高档回报</dt><dd>${recommendation.payout} 张</dd></div><div><dt>每张票成本</dt><dd>${money(recommendation.perScrip)}</dd></div></dl><p>${money(recommendation.batchCost)} ÷ ${recommendation.yieldCount} 个 ÷ ${recommendation.payout} 张</p></article>`;
+    };
+    const craftScripCatalog = ticket => {
+      const grouped = new Map();
+      craftScripCollectibleCandidates(ticket).map(craftScripCollectibleCost).forEach(spec => {
+        const entries = grouped.get(spec.job) || [];
+        entries.push(spec); grouped.set(spec.job, entries);
+      });
+      const rows = [...grouped.entries()].map(([job, entries]) => `<tr class="craft-scrip-job-row"><th colspan="6">${job}</th></tr>${entries.sort((left, right) => left.level - right.level).map(spec => {
+        const status = spec.verified && spec.recipe ? (spec.ready ? '已核验' : '等待补价') : '待核验';
+        return `<tr><td class="label"><button class="bundle-link" data-craft-collectible-detail="${spec.itemId}">${itemLabelMarkup(spec.itemId, spec.name)}</button></td><td>${spec.level}</td><td>${spec.payout || '—'} 张</td><td>${spec.unitCost == null ? '等待补价' : money(spec.unitCost)}</td><td>${spec.perScrip == null ? '—' : money(spec.perScrip)}</td><td><span class="craft-scrip-status ${status === '已核验' ? 'verified' : 'pending'}">${status}</span></td></tr>`;
+      }).join('')}`).join('');
+      return `<section class="material-category craft-scrip-catalog"><div class="craft-scrip-exchange-heading"><div><b>${craftScripTicketLabel(ticket)}收藏品名录</b><span>按职业分组 · ${craftScripCollectibleCandidates(ticket).length} 项 · 成本按最高档回报计算</span></div></div><div class="table-wrap"><table class="ledger"><thead><tr><th>收藏品</th><th>等级</th><th>最高档回报</th><th>单件制作成本</th><th>每张票成本</th><th>资料状态</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">暂无该票种的收藏品资料。</td></tr>'}</tbody></table></div></section>`;
+    };
+    const craftScripManualRows = craftScripManualRoutes();
+    const craftScripManualPanel = `<section class="craft-scrip-manual-panel"><div class="craft-scrip-exchange-heading"><div><b>本机维护兑换材料</b><span>仅本机保存；只有被当前 770／750 配方使用的材料才会进入装备推荐分类。</span></div><button class="btn secondary" type="button" data-craft-scrip-manual-add>+ 添加材料</button></div>${craftScripManualRows.length ? `<div class="table-wrap"><table class="ledger"><thead><tr><th>材料</th><th>票种</th><th>兑换比例</th><th>来源说明</th><th>状态</th><th>操作</th></tr></thead><tbody>${craftScripManualRows.map(route => `<tr><td class="label">${itemLabelMarkup(route.itemId, data.m.find(item => String(item.uid) === route.itemId)?.n || route.name || route.itemId)}</td><td><span class="scrip-ticket ${route.ticket}">${craftScripTicketLabel(route.ticket)}</span></td><td>${craftScripTicketLabel(route.ticket)} ×${route.ticketCost} → ${Number(route.outputQuantity)} 个</td><td class="label">${route.source || '未填写'}</td><td>${route.active ? '启用' : '停用'}</td><td><button class="btn secondary" data-craft-scrip-manual-edit="${route.id}">编辑</button> <button class="btn secondary" data-craft-scrip-manual-toggle="${route.id}">${route.active ? '停用' : '启用'}</button> <button class="btn secondary" data-craft-scrip-manual-delete="${route.id}">删除</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">尚未添加本机维护项。共享资料包中的兑换数据不会在这里重复显示。</div>'}</section>`;
+    const craftScripContent = `<section class="craft-scrip-guide"><div class="craft-scrip-ticket-tabs" role="tablist" aria-label="能工巧匠工票种类">${['orange', 'purple'].map(ticket => `<button type="button" role="tab" data-craft-scrip-ticket="${ticket}" aria-selected="${state.craftScripTicket === ticket}" class="${state.craftScripTicket === ticket ? 'active' : ''}">${craftScripTicketLabel(ticket)}</button>`).join('')}</div><div class="craft-scrip-recommendations">${['orange', 'purple'].map(craftScripRecommendation).join('')}</div>${craftScripCatalog(state.craftScripTicket)}<section class="material-category craft-scrip-exchanges"><div class="craft-scrip-exchange-heading"><b>${craftScripTicketLabel(state.craftScripTicket)}兑换材料</b><span>${materials.length} 项</span></div>${craftScripMaterialTable(materials)}</section>${craftScripManualPanel}</section>`;
     const searchResults = otherSearchResults(state.otherSearch);
     // 未纳入预生成索引的“其他材料”只在实际搜索或已加入列表中请求一次 Garland 资料，
     // 不会在首次进入材料页时批量访问外站。
@@ -1362,12 +1524,13 @@ window.addEventListener('load', async () => {
     const submarineContent = `<details class="material-category" data-material-category="${npcCategoryKey}" ${npcOpen ? 'open' : ''}><summary>NPC 购买材料<span>${submarineNpcMaterials().length} 项 · 固定价格</span></summary><div style="padding:0 16px 12px"><button id="manage-npc-materials" class="btn secondary">管理 NPC 材料</button></div>${npcTable(submarineNpcMaterials())}</details>${submarineTables}`;
     const basicContent = state.basicCategory === 'submarine'
       ? submarineContent
+      : state.basicCategory === 'scrip' ? craftScripContent
       : state.basicCategory === 'other' ? otherContent : categoryTables;
     const gradeSelects = state.basicCategory === 'equipment' ? `<div class="grade-selects"><label class="meta">战职装备品级<select id="combat-grade"><option value="770">770 HQ</option><option value="">无</option></select></label><label class="meta">生产采集装备品级<select id="gathering-grade"><option value="750">750 HQ</option><option value="">无</option></select></label></div>` : '';
     const basicSearchResults = basicMaterialSearchResults(state.basicMaterialSearch);
     const basicSearchValue = String(state.basicMaterialSearch).replace(/[&<>"]/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[character]));
     const basicSearch = `<form id="basic-material-search-form" class="basic-material-search" role="search"><input id="basic-material-search" value="${basicSearchValue}" placeholder="搜索材料名称或 ID" aria-label="搜索基础材料"><button class="btn secondary">搜索</button></form>`;
-    const basicSelect = `<div class="basic-range-toolbar"><div class="basic-range-tabs" role="tablist" aria-label="材料范围"><button type="button" role="tab" data-basic-category="equipment" aria-selected="${state.basicCategory === 'equipment'}" class="${state.basicCategory === 'equipment' ? 'active' : ''}">装备推荐材料</button><button type="button" role="tab" data-basic-category="submarine" aria-selected="${state.basicCategory === 'submarine'}" class="${state.basicCategory === 'submarine' ? 'active' : ''}">潜水艇推荐材料</button><button type="button" role="tab" data-basic-category="other" aria-selected="${state.basicCategory === 'other'}" class="${state.basicCategory === 'other' ? 'active' : ''}">其他材料</button></div>${basicSearch}</div>${state.basicMaterialSearch ? `<div class="basic-material-search-results" aria-live="polite"><div class="meta">搜索结果 ${basicSearchResults.length} 项</div>${basicSearchResults.length ? `<div class="basic-material-search-list">${basicSearchResults.map((result, index) => `<button type="button" class="basic-material-search-result" data-basic-search-result="${index}"><b>${result.material.n}</b><span>ID ${result.material.uid}</span><em>${result.scopeLabel} · ${result.kind}</em></button>`).join('')}</div>` : '<div class="empty">未在基础材料目录中找到相符材料。</div>'}</div>` : ''}${gradeSelects}`;
+    const basicSelect = `<div class="basic-range-toolbar"><div class="basic-range-tabs" role="tablist" aria-label="材料范围"><button type="button" role="tab" data-basic-category="equipment" aria-selected="${state.basicCategory === 'equipment'}" class="${state.basicCategory === 'equipment' ? 'active' : ''}">装备推荐材料</button><button type="button" role="tab" data-basic-category="submarine" aria-selected="${state.basicCategory === 'submarine'}" class="${state.basicCategory === 'submarine' ? 'active' : ''}">潜水艇推荐材料</button><button type="button" role="tab" data-basic-category="scrip" aria-selected="${state.basicCategory === 'scrip'}" class="${state.basicCategory === 'scrip' ? 'active' : ''}">工票材料</button><button type="button" role="tab" data-basic-category="other" aria-selected="${state.basicCategory === 'other'}" class="${state.basicCategory === 'other' ? 'active' : ''}">其他材料</button></div>${basicSearch}</div>${state.basicMaterialSearch ? `<div class="basic-material-search-results" aria-live="polite"><div class="meta">搜索结果 ${basicSearchResults.length} 项</div>${basicSearchResults.length ? `<div class="basic-material-search-list">${basicSearchResults.map((result, index) => `<button type="button" class="basic-material-search-result" data-basic-search-result="${index}"><b>${result.material.n}</b><span>ID ${result.material.uid}</span><em>${result.scopeLabel} · ${result.kind}</em></button>`).join('')}</div>` : '<div class="empty">未在基础材料目录中找到相符材料。</div>'}</div>` : ''}${gradeSelects}`;
     const coverage = baseMaterialMeta.coverage || {};
     const source = baseMaterialMeta.sources || {};
     const sourceNotice = `<div class="note">基础素材索引：770 ${coverage['770'] || 0}/77 · 750 ${coverage['750'] || 0}/39 · 非水晶基础材料 ${baseMaterialMeta.nonCrystalLeafCount || 0} 项；灰机 ${source.huiji || 0} 件 · nbb 回退 ${source.nbb || 0} 件。${baseMaterialMeta.missing?.length ? ` 未覆盖：${baseMaterialMeta.missing.join('、')}` : ''}</div>`;
@@ -1387,6 +1550,26 @@ window.addEventListener('load', async () => {
         state.basicCategory = category;
         renderGuide();
       };
+    });
+    root.querySelectorAll('[data-craft-scrip-ticket]').forEach(button => button.onclick = () => {
+      state.craftScripTicket = button.dataset.craftScripTicket;
+      renderGuide();
+    });
+    root.querySelector('[data-craft-scrip-manual-add]')?.addEventListener('click', () => openCraftScripManualDialog());
+    root.querySelectorAll('[data-craft-scrip-manual-edit]').forEach(button => button.onclick = () => openCraftScripManualDialog(button.dataset.craftScripManualEdit));
+    root.querySelectorAll('[data-craft-scrip-manual-toggle]').forEach(button => button.onclick = () => {
+      const route = craftScripManualExchanges.find(item => String(item.id) === button.dataset.craftScripManualToggle);
+      if (!route) return;
+      route.active = route.active === false;
+      refreshCraftScripConfig();
+      renderGuide();
+    });
+    root.querySelectorAll('[data-craft-scrip-manual-delete]').forEach(button => button.onclick = () => {
+      const route = craftScripManualExchanges.find(item => String(item.id) === button.dataset.craftScripManualDelete);
+      if (!route || !confirm(`删除本机维护项“${route.name || route.itemId}”？`)) return;
+      craftScripManualExchanges = craftScripManualExchanges.filter(item => String(item.id) !== String(route.id));
+      refreshCraftScripConfig();
+      renderGuide();
     });
     const basicMaterialSearch = root.querySelector('#basic-material-search-form');
     if (basicMaterialSearch) basicMaterialSearch.onsubmit = event => {
@@ -1429,8 +1612,68 @@ window.addEventListener('load', async () => {
     };
     root.querySelectorAll('[data-npc-detail]').forEach(button => button.onclick = () => openNpcMaterialDetail(button.dataset.npcDetail));
     root.querySelectorAll('[data-source-detail]').forEach(button => button.onclick = () => openSubmarineMaterialSourceDetail(button.dataset.sourceDetail));
+    root.querySelectorAll('[data-craft-scrip-detail]').forEach(button => button.onclick = () => openCraftScripExchangeDetail(button.dataset.craftScripDetail));
+    root.querySelectorAll('[data-craft-collectible-detail]').forEach(button => button.onclick = () => openCraftScripCollectibleDetail(button.dataset.craftCollectibleDetail));
     root.querySelectorAll('[data-retainer]').forEach(button => button.onclick = () => openRetainerDetail(button.dataset.retainer));
     maybeRefreshMarket();
+  }
+  function openCraftScripExchangeDetail(uid) {
+    const material = data.m.find(item => String(item.uid) === String(uid));
+    const routes = craftScripRoutesFor(uid);
+    if (!material || !routes.length) return;
+    document.querySelector('#bundle-detail-meta').textContent = '材料指导价 > 工票材料';
+    document.querySelector('#bundle-detail-title').textContent = material.n + '工票兑换详情';
+    const rows = routes.map(route => `<tr><td><span class="scrip-ticket ${route.ticket}">${craftScripTicketLabel(route.ticket)}</span></td><td>${route.ticketCost} 张</td><td>${route.outputQuantity || 1} 个</td><td>${route.source || '工票兑换'}</td></tr>`).join('');
+    document.querySelector('#bundle-detail-content').innerHTML = `<div class="cards"><div class="card"><small>市场平均价</small><b>${marketPriceLabel(material)}</b><div class="meta">仅作市场采购参考</div></div><div class="card"><small>采购平均价</small><b>${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</b><div class="meta">历史采购均价</div></div></div><section class="sales-history"><h3>兑换比例</h3><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>票种</th><th>所需工票</th><th>获得数量</th><th>来源说明</th></tr></thead><tbody>${rows}</tbody></table></div><div class="note">工票仅代表取得方式，不会被虚构为金币固定价，也不改变市场价、采购均价或历史成本。</div></section>`;
+    if (!document.querySelector('#bundle-detail-dialog').open) document.querySelector('#bundle-detail-dialog').showModal();
+  }
+  function openCraftScripManualDialog(id = null) {
+    loadItemIndex();
+    const dialog = document.querySelector('#craft-scrip-manual-dialog');
+    const route = id ? craftScripManualExchanges.find(item => String(item.id) === String(id)) : null;
+    state.craftScripManualEditingId = route?.id || null;
+    document.querySelector('#craft-scrip-manual-title').textContent = route ? '编辑本机工票兑换材料' : '添加本机工票兑换材料';
+    document.querySelector('#craft-scrip-manual-id').value = route?.id || '';
+    document.querySelector('#craft-scrip-manual-material').value = route?.name || route?.itemId || '';
+    document.querySelector('#craft-scrip-manual-ticket').value = route?.ticket || state.craftScripTicket || 'orange';
+    document.querySelector('#craft-scrip-manual-cost').value = route?.ticketCost || '';
+    document.querySelector('#craft-scrip-manual-output').value = route?.outputQuantity || 1;
+    document.querySelector('#craft-scrip-manual-source').value = route?.source || '';
+    document.querySelector('#craft-scrip-manual-resolved').textContent = route ? `当前物品 ID：${route.itemId}` : '可填写已收录材料的中文名或物品 ID；未收录名称可稍后在道具索引加载完成后再试。';
+    const error = document.querySelector('#craft-scrip-manual-error'); error.hidden = true; error.textContent = '';
+    if (!dialog.open) dialog.showModal();
+  }
+  function saveCraftScripManualDialog(event) {
+    event.preventDefault();
+    const materialInput = document.querySelector('#craft-scrip-manual-material');
+    const material = findCraftScripMaterial(materialInput.value);
+    const ticket = document.querySelector('#craft-scrip-manual-ticket').value;
+    const ticketCost = Number(document.querySelector('#craft-scrip-manual-cost').value || 0);
+    const outputQuantity = Number(document.querySelector('#craft-scrip-manual-output').value || 0);
+    const source = document.querySelector('#craft-scrip-manual-source').value.trim();
+    const error = document.querySelector('#craft-scrip-manual-error');
+    const fail = (message, input) => { error.textContent = message; error.hidden = false; input?.focus(); };
+    if (!material) return fail('未找到材料。请填写已收录的中文名或物品 ID；道具索引仍在加载时可稍后重试。', materialInput);
+    if (!(ticketCost > 0)) return fail('请填写大于 0 的所需工票。', document.querySelector('#craft-scrip-manual-cost'));
+    if (!(outputQuantity > 0)) return fail('请填写大于 0 的获得数量。', document.querySelector('#craft-scrip-manual-output'));
+    const id = state.craftScripManualEditingId || `manual-scrip-${Date.now()}`;
+    const route = { id, itemId: String(material.uid), name: material.n, ticket, ticketCost, outputQuantity, source, manual: true, active: true, verified: false, scope: '本机手动维护' };
+    const index = craftScripManualExchanges.findIndex(item => String(item.id) === String(id));
+    if (index >= 0) craftScripManualExchanges[index] = { ...craftScripManualExchanges[index], ...route };
+    else craftScripManualExchanges.push(route);
+    refreshCraftScripConfig();
+    document.querySelector('#craft-scrip-manual-dialog').close();
+    renderGuide();
+  }
+  function openCraftScripCollectibleDetail(uid) {
+    const spec = (craftScrips.collectables || []).find(item => String(item.itemId) === String(uid));
+    if (!spec) return;
+    const detail = craftScripCollectibleCost(spec), material = data.m.find(item => String(item.uid) === String(uid));
+    document.querySelector('#bundle-detail-meta').textContent = '材料指导价 > 工票材料 > 收藏品成本';
+    document.querySelector('#bundle-detail-title').textContent = (material?.n || spec.name || uid) + '收藏品成本';
+    const rows = detail.rows.map(row => `<tr><td class="label">${itemLabelMarkup(row.uid, materialName(row.uid))}</td><td>${row.batchQuantity}</td><td>${recommendationTag(row.choice, row.choice.label)}</td><td>${money(row.unit)}</td><td>${money(row.batchTotal)}</td></tr>`).join('');
+    document.querySelector('#bundle-detail-content').innerHTML = `<div class="cards"><div class="card"><small>制作职业</small><b>${detail.job}</b></div><div class="card"><small>每批产出</small><b>${detail.yieldCount} 个</b></div><div class="card"><small>最高档回报</small><b>${detail.payout || '待补充'} ${detail.payout ? `张 ${craftScripTicketLabel(detail.ticket)}` : ''}</b></div><div class="card"><small>每张票成本</small><b>${detail.perScrip == null ? '等待补价' : money(detail.perScrip)}</b></div></div>${detail.reason ? `<div class="note">${detail.reason}，该收藏品暂不参与最低成本推荐。</div>` : ''}<section class="sales-history"><h3>制作材料与成本</h3><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>材料</th><th>批次数量</th><th>采用方式</th><th>单价</th><th>批次合价</th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="empty">暂无可用配方</td></tr>'}</tbody><tfoot><tr><th colspan="4">批次材料合价 ÷ 每批产出 ÷ 最高档回报</th><th>${detail.batchCost == null ? '等待补价' : `${money(detail.batchCost)} ÷ ${detail.yieldCount} ÷ ${detail.payout}`}</th></tr></tfoot></table></div></section>`;
+    if (!document.querySelector('#bundle-detail-dialog').open) document.querySelector('#bundle-detail-dialog').showModal();
   }
   function openSubmarineMaterialSourceDetail(uid) {
     const material = data.m.find(item => String(item.uid) === String(uid));
@@ -1557,18 +1800,24 @@ window.addEventListener('load', async () => {
   function openPurchase(material, purchase = null) {
     const matchingRoutes = exchangeRoutesFor(material.uid).map(route => ({ ...route, index: route.routeIndex }));
     const kind = document.querySelector('#purchase-kind');
+    const kindHint = document.querySelector('#purchase-kind-hint');
+    const purchaseError = document.querySelector('#purchase-error');
     kind.innerHTML = `<option value="direct">直接市场购买</option>${matchingRoutes.map(route => `<option value="exchange:${route.index}">${route.kind} · ${route.label}</option>`).join('')}`;
     kind.value = purchase?.kind === 'exchange' ? `exchange:${purchase.exchangeRoute}` : 'direct';
     document.querySelector('#purchase-kind-label').hidden = matchingRoutes.length === 0;
+    kindHint.hidden = matchingRoutes.length === 0;
+    kindHint.textContent = matchingRoutes.length ? `可选：市场购买、${matchingRoutes.map(route => route.kind).filter((value, index, values) => values.indexOf(value) === index).join('、')}` : '';
+    purchaseError.hidden = true;
+    purchaseError.textContent = '';
     document.querySelector('#purchase-voucher-summary').hidden = true;
     document.querySelector('#purchase-title').textContent = (purchase ? '编辑采购 ' : '采购 ') + material.n;
     document.querySelector('#purchase-date').value = purchase?.date || today();
     document.querySelector('#purchase-quantity').value = purchase?.kind === 'exchange' ? '' : (purchase?.quantity || '');
     document.querySelector('#purchase-tax').value = String(purchase?.tax ?? 0.05);
-    document.querySelector('#purchase-unit').value = purchase?.kind === 'exchange' ? '' : (purchase?.unitPrice || '');
-    document.querySelector('#purchase-total').value = purchase?.kind === 'exchange' ? '' : (purchase?.total || '');
+    document.querySelector('#purchase-unit').value = purchase?.kind === 'exchange' ? '' : moneyInputValue(purchase?.unitPrice);
+    document.querySelector('#purchase-total').value = purchase?.kind === 'exchange' ? '' : moneyInputValue(purchase?.total);
     document.querySelector('#purchase-exchange-turns').value = purchase?.exchangeTurns || 1;
-    document.querySelector('#purchase-source-price').value = purchase?.exchangeSourceUnitPrice || '';
+    document.querySelector('#purchase-source-price').value = moneyInputValue(purchase?.exchangeSourceUnitPrice);
     state.purchaseEditMode = 'unit'; state.selectedMaterial = material.id;
     state.editingPurchaseId = purchase?.id || null;
     const syncMode = (applyDefault = false) => {
@@ -1580,7 +1829,7 @@ window.addEventListener('load', async () => {
       const sourceMaterial = route.carrierId ? data.m.find(item => String(item.uid) === String(route.carrierId)) : null;
       const sourceField = document.querySelector('#purchase-source-price');
       const defaultPrice = route.carrierId ? directSourceChoice(sourceMaterial).price : ticketUnitCost();
-      if (applyDefault && sourceField.value === '') sourceField.value = defaultPrice || '';
+      if (applyDefault && sourceField.value === '') sourceField.value = moneyInputValue(defaultPrice);
       sourceField.readOnly = false;
       document.querySelector('#purchase-source-price-label').firstChild.textContent = route.carrierId ? `${sourceMaterial?.n || '凭证'}单价（G / 个）` : '天穹票单价（G / 张）';
       document.querySelector('#purchase-exchange-note').textContent = route.carrierId
@@ -1589,11 +1838,16 @@ window.addEventListener('load', async () => {
       const turns = Math.max(0, Number(document.querySelector('#purchase-exchange-turns').value || 0));
       const outputQuantity = Number(route.outputs?.[String(material.uid)] || 0) * turns;
       const sourceQuantity = route.carrierId ? turns : turns * Number(route.ticketCost || 0);
-      const total = Math.max(0, Number(document.querySelector('#purchase-source-price').value || 0)) * sourceQuantity;
+      const total = nonNegativeNumber(document.querySelector('#purchase-source-price').value) * sourceQuantity;
       document.querySelector('#purchase-exchange-summary').innerHTML = `获得数量：<b>${outputQuantity}</b> · 合价：<b>${money(total)}</b> · 换算单价：<b>${outputQuantity ? money(total / outputQuantity) : '—'}</b>`;
     };
     state.syncPurchaseMode = syncMode;
-    kind.onchange = () => { document.querySelector('#purchase-source-price').value = ''; syncMode(true); };
+    kind.onchange = () => {
+      normalizePurchaseMoneyInputs();
+      clearPurchaseError();
+      document.querySelector('#purchase-source-price').value = '';
+      syncMode(true);
+    };
     document.querySelector('#purchase-exchange-turns').oninput = () => syncMode(false);
     document.querySelector('#purchase-source-price').oninput = () => syncMode(false);
     syncMode(true);
@@ -2465,22 +2719,68 @@ window.addEventListener('load', async () => {
     if (status.state === 'downloaded' && confirm(`${status.message}\n现在重启并安装吗？`)) desktopBridge.restartToUpdate();
   });
   document.querySelectorAll('[data-close]').forEach(button => button.onclick = () => document.querySelector('#' + button.dataset.close).close());
-  document.querySelectorAll('dialog').forEach(dialog => dialog.onclick = event => {
-    if (event.target === dialog) dialog.close();
+  document.querySelector('#craft-scrip-manual-form').onsubmit = saveCraftScripManualDialog;
+  document.querySelector('#craft-scrip-manual-material').addEventListener('input', event => {
+    const material = findCraftScripMaterial(event.target.value);
+    document.querySelector('#craft-scrip-manual-resolved').textContent = material ? `已识别：${material.n}（ID ${material.uid}）` : '未识别为当前已加载物品；可继续输入物品 ID，或等待道具索引加载完成。';
+    document.querySelector('#craft-scrip-manual-error').hidden = true;
+  });
+  document.querySelectorAll('dialog').forEach(dialog => {
+    let beganOnBackdrop = false;
+    dialog.addEventListener('pointerdown', event => { beganOnBackdrop = event.target === dialog; });
+    dialog.addEventListener('pointercancel', () => { beganOnBackdrop = false; });
+    dialog.addEventListener('click', event => {
+      if (beganOnBackdrop && event.target === dialog) dialog.close();
+      beganOnBackdrop = false;
+    });
   });
   const purchaseQuantity = document.querySelector('#purchase-quantity');
   const purchaseTax = document.querySelector('#purchase-tax');
   const purchaseUnit = document.querySelector('#purchase-unit');
   const purchaseTotal = document.querySelector('#purchase-total');
+  const purchaseSourcePrice = document.querySelector('#purchase-source-price');
+  const purchaseExchangeTurns = document.querySelector('#purchase-exchange-turns');
+  const purchaseError = document.querySelector('#purchase-error');
+  const nonNegativeNumber = value => {
+    const number = Number(String(value ?? '').trim());
+    return Number.isFinite(number) && number >= 0 ? number : 0;
+  };
+  const moneyInputValue = value => {
+    const number = nonNegativeNumber(value);
+    return Number(value) > 0 ? number.toFixed(2) : '';
+  };
+  const normalizeMoneyInput = input => {
+    const text = String(input.value ?? '').trim();
+    if (!text) return 0;
+    const value = nonNegativeNumber(text);
+    input.value = value.toFixed(2);
+    return value;
+  };
+  const normalizePurchaseMoneyInputs = () => [purchaseUnit, purchaseTotal, purchaseSourcePrice].forEach(normalizeMoneyInput);
+  const clearPurchaseError = () => { purchaseError.hidden = true; purchaseError.textContent = ''; };
+  const showPurchaseError = (message, input) => {
+    purchaseError.textContent = message;
+    purchaseError.hidden = false;
+    input?.focus();
+  };
   const syncPurchaseForm = () => {
-    const quantity = Number(purchaseQuantity.value || 0), tax = Number(purchaseTax.value || 0);
-    if (!quantity) return;
+    const quantity = nonNegativeNumber(purchaseQuantity.value), tax = nonNegativeNumber(purchaseTax.value);
+    if (!(quantity > 0)) return;
     if (state.purchaseEditMode === 'total') {
-      purchaseUnit.value = (Number(purchaseTotal.value || 0) / quantity / (1 + tax)).toFixed(2);
+      purchaseUnit.value = (nonNegativeNumber(purchaseTotal.value) / quantity / (1 + tax)).toFixed(2);
     } else {
-      purchaseTotal.value = (quantity * Number(purchaseUnit.value || 0) * (1 + tax)).toFixed(2);
+      purchaseTotal.value = (quantity * nonNegativeNumber(purchaseUnit.value) * (1 + tax)).toFixed(2);
     }
   };
+  [purchaseQuantity, purchaseUnit, purchaseTotal, purchaseSourcePrice, purchaseExchangeTurns].forEach(input => {
+    input.addEventListener('click', () => input.select());
+    input.addEventListener('input', clearPurchaseError);
+  });
+  [purchaseUnit, purchaseTotal, purchaseSourcePrice].forEach(input => input.addEventListener('blur', () => {
+    normalizeMoneyInput(input);
+    if (input !== purchaseSourcePrice) syncPurchaseForm();
+    else state.syncPurchaseMode?.(false);
+  }));
   purchaseUnit.oninput = () => { state.purchaseEditMode = 'unit'; syncPurchaseForm(); };
   purchaseTotal.oninput = () => { state.purchaseEditMode = 'total'; syncPurchaseForm(); };
   purchaseQuantity.oninput = syncPurchaseForm;
@@ -2492,12 +2792,14 @@ window.addEventListener('load', async () => {
     let entry;
     if (mode.startsWith('exchange:')) {
       const routeIndex = Number(mode.slice(9)), route = exchangeSources.routes?.[routeIndex];
-      const turns = Math.max(0, Number(document.querySelector('#purchase-exchange-turns').value || 0));
-      const sourceUnitPrice = Math.max(0, Number(document.querySelector('#purchase-source-price').value || 0));
+      normalizeMoneyInput(purchaseSourcePrice);
+      const turns = nonNegativeNumber(document.querySelector('#purchase-exchange-turns').value);
+      const sourceUnitPrice = nonNegativeNumber(purchaseSourcePrice.value);
       const outputPerTurn = Number(route?.outputs?.[String(material?.uid)] || 0);
       const sourceQuantity = route?.carrierId ? turns : turns * Number(route?.ticketCost || 0);
       const quantity = turns * outputPerTurn, total = sourceQuantity * sourceUnitPrice;
-      if (!material || !route || !turns || !quantity || !total) return alert('请填写有效的兑换次数和凭证单价。');
+      if (!material || !route || !(turns > 0) || !(quantity > 0)) return showPurchaseError('请填写大于 0 的兑换次数。', document.querySelector('#purchase-exchange-turns'));
+      if (!(sourceUnitPrice > 0) || !(total > 0)) return showPurchaseError('请填写大于 0 的凭证单价。', purchaseSourcePrice);
       entry = {
         id: state.editingPurchaseId || 'exchange-' + Date.now(), kind: 'exchange', materialId: material.id,
         date: document.querySelector('#purchase-date').value || today(), quantity, unitPrice: total / quantity, total, tax: 0,
@@ -2505,8 +2807,10 @@ window.addEventListener('load', async () => {
         exchangeTurns: turns, exchangeSourceUnitPrice: sourceUnitPrice, exchangeSourceQuantity: sourceQuantity
       };
     } else {
-      const quantity = Number(purchaseQuantity.value || 0), tax = Number(purchaseTax.value || 0), unitPrice = Number(purchaseUnit.value || 0), total = Number(purchaseTotal.value || 0);
-      if (!material || !quantity || !total) return alert('请填写购买数量和单价或合价。');
+      normalizeMoneyInput(purchaseUnit); normalizeMoneyInput(purchaseTotal); syncPurchaseForm();
+      const quantity = nonNegativeNumber(purchaseQuantity.value), tax = nonNegativeNumber(purchaseTax.value), unitPrice = nonNegativeNumber(purchaseUnit.value), total = nonNegativeNumber(purchaseTotal.value);
+      if (!material || !(quantity > 0)) return showPurchaseError('请填写大于 0 的购买数量。', purchaseQuantity);
+      if (!(unitPrice > 0) && !(total > 0)) return showPurchaseError('请填写大于 0 的单价或合价。', state.purchaseEditMode === 'total' ? purchaseTotal : purchaseUnit);
       entry = { id: state.editingPurchaseId || 'purchase-' + Date.now(), materialId: material.id, date: document.querySelector('#purchase-date').value || today(), quantity, unitPrice, total, tax };
     }
     const index = purchases.findIndex(row => row.id === state.editingPurchaseId);

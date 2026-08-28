@@ -117,6 +117,39 @@ main { max-width: none; width: 100%; margin: 0; padding: 22px 28px 36px; }
 .material-category summary { padding: 11px 13px; color: var(--ink); }
 .material-category summary span { color: var(--muted); }
 .material-category .table-wrap { margin: 0; border: 0; border-top: 1px solid var(--line); }
+.craft-scrip-subcategories { padding: 0 12px 12px; }
+.craft-scrip-subcategory { margin-top: 10px; border: 1px solid var(--line); background: #fff; }
+.craft-scrip-subcategory summary { padding: 9px 10px; cursor: pointer; font-weight: 700; }
+.craft-scrip-subcategory summary span { float: right; color: var(--muted); font-size: 12px; font-weight: 400; }
+.craft-scrip-guide { margin-top: 14px; }
+.craft-scrip-ticket-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.craft-scrip-ticket-tabs button { min-height: 36px; padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: 3px; background: #fff; color: var(--muted); cursor: pointer; font: 700 13px "Microsoft YaHei", sans-serif; }
+.craft-scrip-ticket-tabs button:hover, .craft-scrip-ticket-tabs button.active { border-color: var(--ink); color: var(--ink); background: #fafafa; }
+.craft-scrip-recommendations { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.craft-scrip-recommendation { min-height: 148px; padding: 15px 16px; border: 1px solid var(--line-strong); border-left: 3px solid #bd8a39; background: #fff; }
+.craft-scrip-recommendation.pending { border-left-color: #aeb5b9; }
+.craft-scrip-recommendation strong { display: block; margin-top: 9px; font-size: 15px; }
+.craft-scrip-recommendation p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.craft-scrip-recommendation dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 16px; margin: 12px 0 0; }
+.craft-scrip-recommendation dl div { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.craft-scrip-recommendation dt { color: var(--muted); font-size: 12px; }
+.craft-scrip-recommendation dd { margin: 0; color: var(--ink); font-weight: 700; font-size: 12px; }
+.craft-scrip-exchanges { margin-top: 0; }
+.craft-scrip-catalog { margin: 0 0 12px; }
+.craft-scrip-catalog .table-wrap { border-top: 1px solid var(--line); }
+.craft-scrip-job-row th { padding: 8px 12px; background: #fbfbfb; color: var(--ink); font-size: 13px; text-align: left; }
+.craft-scrip-status { display: inline-flex; align-items: center; min-height: 22px; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.craft-scrip-status.verified { border-color: #a9cdb8; color: #18784a; background: #f5fbf7; }
+.craft-scrip-status.pending { border-color: #d9c99c; color: #896b1f; background: #fffcf2; }
+.craft-scrip-exchange-heading { display: flex; justify-content: space-between; gap: 12px; padding: 11px 13px; color: var(--ink); }
+.craft-scrip-exchange-heading span { color: var(--muted); font-size: 12px; }
+.craft-scrip-exchange-heading > div { display: flex; flex-direction: column; gap: 3px; }
+.craft-scrip-manual-panel { margin-top: 12px; border: 1px solid var(--line); background: #fff; }
+.craft-scrip-manual-panel .table-wrap { border-top: 1px solid var(--line); }
+.craft-scrip-manual-panel .empty { padding: 14px; }
+.scrip-ticket { display: inline-block; padding: 2px 7px; border: 1px solid; border-radius: 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.scrip-ticket.orange { border-color: #e0b36f; background: #fff1dc; color: #a55d12; }
+.scrip-ticket.purple { border-color: #c7afe6; background: #f0e9fb; color: #724b9f; }
 .material-tag, .recommend-tag, .npc-tag { border: 1px solid var(--line-strong); border-radius: 2px; background: #fff; color: var(--muted); font-weight: 400; }
 .recommend-tag { display: inline-block; margin-right: 5px; padding: 2px 6px; border-radius: 10px; font-size: 11px; font-weight: 700; }
 .recommend-market { background: #e1f0fb; color: #17648b; border-color: #b6d9ee; }
@@ -236,6 +269,8 @@ dialog::backdrop, #bundle-detail-dialog::backdrop { background: #00000024; }
   .card:nth-child(2) { border-right: 0; }
   .card:nth-child(n+3) { border-top: 1px solid var(--line); }
   .crystal-grid, .equipment-summaries { grid-template-columns: 1fr; }
+  .craft-scrip-recommendations { grid-template-columns: 1fr; }
+  .craft-scrip-exchange-heading { align-items: flex-start; }
   .update-panels { grid-template-columns: 1fr; }
   .submarine-total-profit { align-items: flex-start; flex-direction: column; }
   .submarine-profit-columns { grid-template-columns: 1fr; }

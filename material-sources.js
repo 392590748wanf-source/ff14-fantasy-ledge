@@ -12,6 +12,8 @@ window.FF14_MATERIAL_SOURCES = {
   '5113': { name: '银矿', nativeSubmarineKinds: ['常规采集品'] },
   '5116': { name: '钴铁矿', nativeSubmarineKinds: ['常规采集品'] },
   '5118': { name: '金矿', nativeSubmarineKinds: ['常规采集品'] },
+  // 已核验来源覆盖层：优先于 nbb-preset.js 的历史推断分类，不改变配方或价格。
+  '5119': { name: '斑铜矿', nativeSubmarineKinds: ['军票兑换'], verified: { submarine: '军票兑换', sources: ['https://na.finalfantasyxiv.com/lodestone/character/37999657/blog/5167902'] } },
   '5120': { name: '白金矿', submarineKinds: ['限时采集品'] },
   '5121': { name: '玄铁矿', nativeSubmarineKinds: ['限时采集品'] },
   '5395': { name: '云杉原木', submarineKinds: ['限时采集品'] },
@@ -57,7 +59,15 @@ window.FF14_MATERIAL_SOURCES = {
   '15649': { name: '玻璃纤维', submarineKinds: ['军票兑换'] },
   '19999': { name: '迦迦纳怪鸟的粗皮', submarineKinds: ['怪物掉落'] },
   '25008': { name: '铁纹矿石', submarineKinds: ['潜水艇携带材料'] },
-  '44070': { name: '小鸣鼠的刃爪', equipmentKinds: ['怪物掉落'] }
+  '44070': { name: '小鸣鼠的刃爪', equipmentKinds: ['怪物掉落'] },
+  '45972': { name: '洋红虫染料', equipmentKinds: ['限时采集品'], verified: { equipment: '限时采集品', sources: ['https://ff14.huijiwiki.com/wiki/Data%3A%E8%A1%A5%E5%85%85%E6%95%B0%E6%8D%AE/%E9%87%87%E9%9B%86%E7%82%B9.tabx'] } },
+  '49212': { name: '园圃软水', equipmentKinds: ['限时采集品'], verified: { equipment: '限时采集品', sources: ['https://ff14.huijiwiki.com/wiki/%E7%89%A9%E5%93%81%3A%E5%9B%AD%E5%9C%83%E8%BD%AF%E6%B0%B4'] } },
+  '45987': { name: '克罗诺兽的粗皮', equipmentKinds: ['神典石材料'], verified: { equipment: '神典石材料', sources: ['https://ff14.huijiwiki.com/wiki/Data%3AItem/45987.json'] } },
+  '44057': { name: '卡冈图亚的粗皮', equipmentKinds: ['怪物掉落'], verified: { equipment: '怪物掉落', sources: ['https://ff14.huijiwiki.com/wiki/%E7%89%A9%E5%93%81%3A%E5%8D%A1%E5%86%88%E5%9B%BE%E4%BA%9A%E7%9A%84%E7%B2%97%E7%9A%AE'] } },
+  '45988': { name: '不飞恐鸟的毛', equipmentKinds: ['神典石材料'], verified: { equipment: '神典石材料', sources: ['https://ff14.huijiwiki.com/wiki/%E7%89%A9%E5%93%81%3A%E4%B8%8D%E9%A3%9E%E6%81%90%E9%B8%9F%E7%9A%84%E6%AF%9B'] } },
+  '49226': { name: '乳齿象的粗皮', equipmentKinds: ['神典石材料'], verified: { equipment: '神典石材料', sources: ['https://ff14.huijiwiki.com/wiki/%E7%89%A9%E5%93%81%3A%E4%B9%B3%E9%BD%BF%E8%B1%A1%E7%9A%84%E7%B2%97%E7%9A%AE'] } },
+  '44848': { name: '高浓缩炼金药', equipmentKinds: ['能工巧匠工票兑换'], verified: { equipment: '能工巧匠工票兑换', sources: ['https://ff14.huijiwiki.com/wiki/%E5%B7%A7%E6%89%8B%E6%A9%99%E7%A5%A8'] } },
+  '46252': { name: '石匠研磨剂', equipmentKinds: ['能工巧匠工票兑换'], verified: { equipment: '能工巧匠工票兑换', sources: ['https://ff14.huijiwiki.com/wiki/%E7%89%A9%E5%93%81%3A%E7%9F%B3%E5%8C%A0%E7%A0%94%E7%A3%A8%E5%89%82'] } }
 };
 
 // 仅记录潜水艇递归配方实际使用的兑换材料。凭证价格由应用内采购记录或市场快照提供。

@@ -39,9 +39,62 @@ await execute(presetSandbox, 'nbb-preset.js');
 if (!presetSandbox.nbbData) throw new Error('无法读取 nbb-preset.js 中的内置装备数据。');
 
 const sandbox = createSandbox();
-for (const file of ['base-materials.js', 'submarine-data.js', 'hqhelper-fallback.js', 'retainer-data.js', 'material-sources.js']) {
+for (const file of ['base-materials.js', 'submarine-data.js', 'hqhelper-fallback.js', 'retainer-data.js', 'material-sources.js', 'craft-scrip-data.js', 'craft-scrips.js']) {
   await execute(sandbox, file);
 }
+
+const equipmentSourceAudit = () => {
+  const materials = sandbox.window.FF14_BASE_MATERIALS || {};
+  const sources = sandbox.window.FF14_MATERIAL_SOURCES || {};
+  const items = sandbox.window.FF14_HQHELPER_FALLBACK?.items || {};
+  const ids = new Set();
+  for (const recipe of Object.values(materials.b || {})) {
+    for (let index = 0; index < recipe.length; index += 2) ids.add(String(recipe[index]));
+  }
+  return [...ids].sort((left, right) => Number(left) - Number(right)).map(uid => {
+    const source = sources[uid] || {};
+    const category = source.verified?.equipment || source.equipmentKinds?.[0] || materials.k?.[uid] || '常规采集品';
+    return {
+      uid: Number(uid),
+      name: source.name || items[uid]?.n || `物品 ${uid}`,
+      category,
+      status: source.verified?.equipment ? '已核验' : '待核验',
+      sources: source.verified?.sources || []
+    };
+  });
+};
+
+const craftScripAudit = () => {
+  const scrips = sandbox.window.FF14_CRAFT_SCRIPS || {};
+  const items = { ...(sandbox.window.FF14_HQHELPER_FALLBACK?.items || {}), ...(scrips.items || {}) };
+  const recipes = { ...(sandbox.window.FF14_HQHELPER_FALLBACK?.recipes || {}), ...(scrips.recipes || {}) };
+  const itemName = uid => items[String(uid)]?.n || `物品 ${uid}`;
+  return {
+    version: scrips.version || '未标记',
+    publishedAt: scrips.publishedAt || null,
+    sources: scrips.sources || {},
+    status: scrips.audit?.status || '待核验',
+    note: scrips.audit?.note || '',
+    tickets: Object.entries(scrips.tickets || {}).map(([key, ticket]) => ({ key, label: ticket.label, minimumCollectableLevel: ticket.minimumCollectableLevel || null, scope: ticket.scope || '' })),
+    exchanges: (scrips.exchanges || []).map(route => ({
+      uid: Number(route.itemId), name: route.name || itemName(route.itemId),
+      ticket: route.ticket, ticketCost: route.ticketCost, outputQuantity: route.outputQuantity,
+      status: route.verified ? '已核验' : (items[route.itemId] ? '已核验物品' : '待核验物品'),
+      source: route.source, sourceUrl: route.sourceUrl || '', scope: route.scope || ''
+    })),
+    collectables: (scrips.collectables || []).map(spec => {
+      const recipe = recipes[String(spec.itemId)]?.[0];
+      const ready = Boolean(spec.itemId && spec.job && Number(spec.maxPayout) > 0 && recipe);
+      return {
+        uid: Number(spec.itemId), name: spec.name || itemName(spec.itemId), ticket: spec.ticket,
+        level: spec.level || null, job: spec.job || '', outputQuantity: spec.outputQuantity || recipe?.y || null,
+        maxPayout: spec.maxPayout || null, recipeSource: spec.recipeSource || scrips.sources?.garland || '',
+      ratings: spec.ratings || [], payouts: spec.payouts || [], marketExcluded: Boolean(spec.marketExcluded),
+      status: ready && spec.verified ? '已核验' : '等待补充', reason: ready && spec.verified ? '' : '缺少物品、职业、配方、最高档回报或 Garland 核验'
+      };
+    })
+  };
+};
 
 const bundle = {
   schema: 1,
@@ -54,7 +107,9 @@ const bundle = {
     hqHelperFallback: sandbox.window.FF14_HQHELPER_FALLBACK,
     retainerData: sandbox.window.FF14_RETAINER_DATA,
     materialSources: sandbox.window.FF14_MATERIAL_SOURCES,
-    exchangeSources: sandbox.window.FF14_EXCHANGE_SOURCES
+    exchangeSources: sandbox.window.FF14_EXCHANGE_SOURCES,
+    craftScrips: sandbox.window.FF14_CRAFT_SCRIPS,
+    materialSourceAudit: { equipment: equipmentSourceAudit(), craftScrips: craftScripAudit() }
   }
 };
 const bundleText = json(bundle);
