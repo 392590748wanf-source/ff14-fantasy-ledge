@@ -16,13 +16,14 @@ window.addEventListener('load', async () => {
     exchangeSources: 'FF14_EXCHANGE_SOURCES',
     craftScrips: 'FF14_CRAFT_SCRIPS',
     levequests: 'FF14_LEVEQUESTS',
+    levequestCatalog: 'FF14_LEVEQUEST_CATALOG',
     levequestRecipes: 'FF14_LEVEQUEST_RECIPES',
     levequestMaterialSources: 'FF14_LEVEQUEST_MATERIAL_SOURCES'
   };
   Object.entries(datasetGlobals).forEach(([key, globalName]) => {
     if (externalDatasets[key] && typeof externalDatasets[key] === 'object') window[globalName] = externalDatasets[key];
   });
-  const state = { page: 'home', type: null, expanded: false, submarineExpanded: false, submarineView: 'summary', submarinePartsOpen: false, guideView: 'basic', guideExpanded: false, selectedMaterial: null, basicCategory: 'equipment', craftScripTicket: 'orange', craftScripManualEditingId: null, otherSearch: '', basicMaterialSearch: '', tradeView: 'inventory', tradeSearch: '', tradeEditingId: null, tradeSourceLoading: new Set(), tradeSourceFailures: new Map(), tradeSourceAudited: new Set(), leveJob: '刻木匠', leveStart: 1, leveTarget: 30, leveDouble: false, leveGuideJob: '', leveGuideStart: '', leveGuideTarget: '', equipmentGroups: {}, equipmentSections: {}, guideCategories: {}, marketRefreshing: false, marketMessage: '', equipmentCombatTier: '770', equipmentGatheringTier: '750', equipmentSummaryTiers: { combat: '770', gathering: '750' }, submarineGroups: {}, itemIndexLoading: false, itemIconIndexLoading: false, garlandIconLoading: new Set() };
+  const state = { page: 'home', type: null, expanded: false, submarineExpanded: false, submarineView: 'summary', submarinePartsOpen: false, guideView: 'basic', guideExpanded: false, selectedMaterial: null, basicCategory: 'equipment', craftScripTicket: 'orange', craftScripManualEditingId: null, otherSearch: '', basicMaterialSearch: '', tradeView: 'inventory', tradeSearch: '', tradeEditingId: null, tradeSourceLoading: new Set(), tradeSourceFailures: new Map(), tradeSourceAudited: new Set(), leveJob: '刻木匠', leveStart: 20, leveTarget: 100, leveDouble: false, levePlanEditing: false, leveCatalogSearch: '', leveCatalogCollapsed: {}, leveGuideJob: '', leveGuideStart: '', leveGuideTarget: '', equipmentGroups: {}, equipmentSections: {}, guideCategories: {}, marketRefreshing: false, marketMessage: '', equipmentCombatTier: '770', equipmentGatheringTier: '750', equipmentSummaryTiers: { combat: '770', gathering: '750' }, submarineGroups: {}, itemIndexLoading: false, itemIconIndexLoading: false, garlandIconLoading: new Set() };
   const data = JSON.parse(localStorage.getItem('ff14-770') || '{"m":[],"r":[],"p":{},"l":[]}');
   const mergeMaterials = (defaults, saved) => {
     const savedById = new Map((saved || []).map(item => [String(item.id), item]));
@@ -308,7 +309,7 @@ window.addEventListener('load', async () => {
     'ff14-770', 'ff14-material-state', 'ff14-material-purchases', 'ff14-fantasy-prices',
     'ff14-submarine-ticket-settings', 'ff14-other-material-ids', 'ff14-submarine-stocks',
     'ff14-submarine-sales', 'ff14-submarine-suite-sales', 'ff14-submarine-operations',
-    'ff14-submarine-npc-materials', 'ff14-submarine-suites', craftScripManualStorageKey, tradeInventoryStorageKey, tradeSourceCacheStorageKey, garlandVentureCoreCacheStorageKey, 'ff14-market-refreshed-at'
+    'ff14-submarine-npc-materials', 'ff14-submarine-suites', 'ff14-leve-plans', craftScripManualStorageKey, tradeInventoryStorageKey, tradeSourceCacheStorageKey, garlandVentureCoreCacheStorageKey, 'ff14-market-refreshed-at'
   ];
   const backupFormat = 'ff14-fantasy-backup';
   const createBackup = () => ({
@@ -382,7 +383,7 @@ window.addEventListener('load', async () => {
   const itemIconId = uid => {
     const key = String(uid);
     const craftScripIcon = Number(window.FF14_CRAFT_SCRIPS?.items?.[key]?.i || window.FF14_CRAFT_SCRIP_DATA?.items?.[key]?.i || 0);
-    const leveIcon = Number((window.FF14_LEVEQUESTS?.routes || []).find(route => String(route.itemId) === key)?.itemIcon || 0);
+    const leveIcon = Number((window.FF14_LEVEQUEST_CATALOG?.routes || window.FF14_LEVEQUESTS?.routes || []).find(route => String(route.itemId) === key)?.itemIcon || 0);
     const leveRecipeIcon = Number(window.FF14_LEVEQUEST_RECIPES?.items?.[key]?.icon || 0);
     const direct = Number(garlandIconIndex[key] || garlandIconCache[key] || craftScripIcon || leveIcon || leveRecipeIcon || 0);
     const indexed = Number(window.FF14_ITEM_ICON_INDEX?.[key] || 0);
@@ -414,7 +415,10 @@ window.addEventListener('load', async () => {
   const itemIconMarkup = (uid, options = {}) => {
     if (options.hq) {
       const nbbIcon = levequestNbbIconPath(uid);
-      return nbbIcon ? `<img class="item-icon levequest-item-icon" src="${nbbIcon}" alt="" aria-hidden="true" loading="lazy" decoding="async" onerror="this.remove()">` : '';
+      const fallbackIcon = itemIconId(uid);
+      const fallback = fallbackIcon ? `https://www.garlandtools.org/files/icons/item/${fallbackIcon}.png` : '';
+      if (nbbIcon) return `<img class="item-icon levequest-item-icon" src="${nbbIcon}" alt="" aria-hidden="true" loading="lazy" decoding="async" onerror="${fallback ? `this.onerror=null;this.src='${fallback}'` : 'this.remove()'}">`;
+      return fallback ? `<img class="item-icon" src="${fallback}" alt="" aria-hidden="true" loading="lazy" decoding="async" onerror="this.remove()">` : '';
     }
     const iconId = itemIconId(uid);
     if (!iconId) return '';
@@ -434,6 +438,30 @@ window.addEventListener('load', async () => {
   const exchangeSources = window.FF14_EXCHANGE_SOURCES || { carriers: {}, routes: [] };
   const craftScrips = window.FF14_CRAFT_SCRIPS || { tickets: {}, exchanges: [], collectables: [], items: {}, recipes: {} };
   const levequests = window.FF14_LEVEQUESTS || { jobs: [], routes: [] };
+  const leveCatalog = window.FF14_LEVEQUEST_CATALOG || { jobs: levequests.jobs || [], routes: levequests.routes || [], audit: {} };
+  const levePlanStorageKey = 'ff14-leve-plans';
+  const leveCatalogKey = route => String(route?.leveId || '');
+  const systemLevePlanVersion = 2;
+  const systemLevePlanEntries = () => {
+    const variant = state.leveDouble ? 'double' : 'normal';
+    return (leveCatalog.routes || []).filter(route => Number(route.systemPlan?.[variant] || 0) > 0)
+      .map(route => ({ leveId: Number(route.leveId), allowances: Number(route.systemPlan[variant]) }));
+  };
+  const normalizeLevePlan = plan => ({
+    id: String(plan?.id || ''), name: String(plan?.name || '未命名方案').trim() || '未命名方案', system: Boolean(plan?.system), planVersion: Number(plan?.planVersion || 0),
+    entries: [...new Map((plan?.entries || []).map(entry => [String(entry?.leveId || ''), { leveId: Number(entry?.leveId || 0), allowances: Math.max(1, Number(entry?.allowances || 1)) }]))
+      .values()].filter(entry => entry.leveId !== 0)
+  });
+  const defaultLevePlans = () => [{ id: 'system-default', name: '方案一（系统推荐）', system: true, planVersion: systemLevePlanVersion, entries: systemLevePlanEntries() }];
+  const storedLevePlans = JSON.parse(localStorage.getItem(levePlanStorageKey) || 'null');
+  let levePlans = Array.isArray(storedLevePlans?.plans) && storedLevePlans.plans.length
+    ? storedLevePlans.plans.map(normalizeLevePlan)
+    : defaultLevePlans();
+  levePlans = levePlans.map(plan => plan.system && plan.planVersion !== systemLevePlanVersion
+    ? { ...plan, planVersion: systemLevePlanVersion, entries: systemLevePlanEntries() } : plan);
+  let activeLevePlanId = levePlans.some(plan => plan.id === storedLevePlans?.activeId) ? storedLevePlans.activeId : levePlans[0].id;
+  const activeLevePlan = () => levePlans.find(plan => plan.id === activeLevePlanId) || levePlans[0];
+  const saveLevePlans = () => localStorage.setItem(levePlanStorageKey, JSON.stringify({ schema: 1, activeId: activeLevePlanId, plans: levePlans.map(normalizeLevePlan) }));
   const levequestRecipes = window.FF14_LEVEQUEST_RECIPES || { items: {}, recipes: {}, audit: {} };
   const levequestMaterialSources = window.FF14_LEVEQUEST_MATERIAL_SOURCES || { items: {}, audit: {} };
   const normalizeCraftScripExchange = (route, manual = false) => {
@@ -884,7 +912,7 @@ window.addEventListener('load', async () => {
     const start = Number(filters.start || 0), target = Number(filters.target || 0);
     return (!job || route.job === job) && (!start || Number(route.level) >= start) && (!target || Number(route.level) < target);
   };
-  const leveGuideRoutes = () => (levequests.routes || []).filter(route => leveRouteMatches(route, {
+  const leveGuideRoutes = () => (leveCatalog.routes || []).filter(route => leveRouteMatches(route, {
     job: state.leveGuideJob, start: state.leveGuideStart, target: state.leveGuideTarget
   }));
   // 理符根物品必须有已核验 ID；此处仅将资料包已有的物品元数据投影到内存，
@@ -3300,7 +3328,18 @@ window.addEventListener('load', async () => {
     });
     if (state.tradeView === 'inventory') revalidateTradeInventorySources();
   }
-  const leveRouteRows = () => (levequests.routes || []).filter(row => row.job === state.leveJob && Number(row.level) >= Number(state.leveStart) && Number(row.level) < Number(state.leveTarget));
+  // 系统方案一沿用 20–100 级攻略；自定义方案可从完整生产理符库选择 1–100 级任务。
+  const leveGuideStartLevel = 1;
+  const levePlanRoutes = () => {
+    const planEntries = new Map((activeLevePlan()?.entries || []).map(entry => [String(entry.leveId), entry]));
+    return (leveCatalog.routes || []).flatMap(route => {
+      const entry = planEntries.get(leveCatalogKey(route));
+      return entry ? [{ ...route, routeAllowances: entry.allowances, routeQuantity: entry.allowances * Math.max(1, Number(route.submissionsPerAllowance || 1)) }] : [];
+    });
+  };
+  const leveRouteRows = () => levePlanRoutes().filter(row => row.job === state.leveJob
+    && Number(row.level) >= Number(state.leveStart)
+    && Number(row.level) < Number(state.leveTarget));
   const leveExperiencePlan = (routes, start, target, multiplier) => {
     const levelExperience = levequests.levelExperience || [];
     const requiredExperience = levelExperience.slice(start, target).reduce((sum, value) => sum + Number(value || 0), 0);
@@ -3324,7 +3363,8 @@ window.addEventListener('load', async () => {
       const experiencePerSubmission = Math.max(0, Number(row.experiencePerSubmission || 0));
       const experiencePerAllowance = experiencePerSubmission * submissions * multiplier;
       let allowances = 0, blockedAtLevel = null;
-      while (allowances < originalAllowances && plannedExperience < requiredExperience) {
+      // 方案一的额度直接来自已提供的常规／双倍表；这里只模拟经验与 90 级失效规则，不再按目标经验收缩额度。
+      while (allowances < originalAllowances) {
         if (!(experiencePerAllowance > 0)) break;
         if (!routeHasExperienceAtLevel(row)) { blockedAtLevel = currentLevel; break; }
         allowances += 1;
@@ -3355,7 +3395,7 @@ window.addEventListener('load', async () => {
   function renderLeve() {
     loadItemIconIndex();
     const start = Number(state.leveStart), target = Number(state.leveTarget);
-    const validRange = Number.isInteger(start) && Number.isInteger(target) && start >= 1 && target <= 100 && target > start;
+    const validRange = Number.isInteger(start) && Number.isInteger(target) && start >= leveGuideStartLevel && target <= 100 && target > start;
     const routes = validRange ? leveRouteRows() : [];
     const serverMultiplier = state.leveDouble ? 2 : 1, hqMultiplier = 2, multiplier = hqMultiplier * serverMultiplier;
     const plan = validRange ? leveExperiencePlan(routes, start, target, multiplier) : { rows: [], requiredExperience: 0, plannedExperience: 0, overflowExperience: 0, shortfallExperience: 0, endingLevel: start };
@@ -3372,27 +3412,116 @@ window.addEventListener('load', async () => {
       const material = leveKnownMaterial(row), cost = leveRecipeCost(row), submissions = Number(row.submissions || 1), xp = Number(row.experiencePerSubmission || 0);
       const allowances = Number(row.plannedAllowances || 0), originalAllowances = Number(row.originalAllowances || 0);
       const factors = [moneyFormatter.format(xp), submissions, allowances, 'HQ 2', ...(state.leveDouble ? ['服务器 2'] : [])];
-      const experience = !(xp > 0)
-        ? '等待任务匹配'
-        : row.blockedAtLevel != null && allowances === 0
-          ? `当前模拟等级 ${row.blockedAtLevel}：任务等级 ${row.level} 无经验`
-          : allowances > 0
-            ? `${factors.join(' × ')} = ${moneyFormatter.format(row.plannedExperience)}`
-            : '目标经验已满足，无需提交';
-      const sources = row.garlandUrl ? `<a href="${row.garlandUrl}" target="_blank" rel="noreferrer">Garland 已核验</a>${row.wikiUrl ? ` · <a href="${row.wikiUrl}" target="_blank" rel="noreferrer">Wiki 对照</a>` : ''}` : (row.verificationStatus === 'wiki-manual-verified' && row.wikiUrl ? `<a href="${row.wikiUrl}" target="_blank" rel="noreferrer">Wiki 已核验</a>` : (row.wikiUrl ? `<a href="${row.wikiUrl}" target="_blank" rel="noreferrer">Wiki 待对照</a>` : '待处理'));
       const itemLabel = material ? itemLabelMarkup(material.uid, row.item, { hq: true }) : `${row.item} <span class="meta">（待核验物品 ID）</span>`;
+      const plannedQuantity = Number(row.plannedQuantity || 0);
+      const totalCost = cost.unit * plannedQuantity;
+      const costFormula = `单件当前成本 ${money(cost.unit)} × 物品数量 ${plannedQuantity} = ${money(totalCost)}`;
+      const experienceFormula = `${factors.join(' × ')} = ${moneyFormatter.format(row.plannedExperience)}`;
       const costLabel = allowances > 0
-        ? cost.unit > 0 ? `${money(cost.unit)}<br><b>${money(cost.unit * Number(row.plannedQuantity))}</b><br><small>按计划交付数</small>` : cost.reason
+        ? cost.unit > 0 ? `<span class="leve-metric" tabindex="0" data-tooltip="${costFormula}">${money(totalCost)}</span>` : cost.reason
         : '—';
-      return `<tr><td>${index + 1}</td><td>${row.level}</td><td class="label">${material ? `<button class="bundle-link" data-leve-detail="${material.uid}">${itemLabel}</button>` : itemLabel}</td><td>计划 ${row.plannedQuantity} 个 / ${Number(row.routeQuantity || 0)} 个<br><small>${allowances} / ${originalAllowances} 额度 · ${submissions} 次 / 额度 · HQ 交付</small></td><td>${experience}${row.blockedAtLevel != null && allowances > 0 ? `<br><small>到达 ${row.blockedAtLevel} 级后，剩余额度无经验</small>` : ''}</td><td>${costLabel}</td><td class="label">${row.quest}<br><small>${row.place || '待补充地点'}${row.note ? ` · ${row.note}` : ''}</small><br><small>${sources}</small></td></tr>`;
+      const experience = !(xp > 0) ? '等待任务匹配' : allowances > 0
+        ? `<span class="leve-metric" tabindex="0" data-tooltip="${experienceFormula}">${moneyFormatter.format(row.plannedExperience)}</span>`
+        : `当前模拟等级 ${row.blockedAtLevel}：任务等级 ${row.level} 无经验`;
+      return `<tr><td>${row.level}</td><td class="label"><b>${row.quest}</b></td><td class="label">${material ? `<button class="bundle-link" data-leve-detail="${material.uid}">${itemLabel}</button>` : itemLabel}</td><td>${plannedQuantity}</td><td>${allowances}</td><td>${experience}</td><td>${costLabel}</td><td class="label">${row.place || '待补充地点'}${row.note ? `<br><small>${row.note}</small>` : ''}</td></tr>`;
     }).join('');
     const root = document.querySelector('#leve');
     const experienceStatus = plan.shortfallExperience > 0
       ? `额度不足 ${moneyFormatter.format(plan.shortfallExperience)} 经验`
       : plan.overflowExperience > 0 ? `预计溢出 ${moneyFormatter.format(plan.overflowExperience)} 经验` : '刚好满足目标经验';
-    root.innerHTML = `<div class="header"><div><div class="meta">理符售卖 · 生产职业升级规划</div><h1>理符升级推荐</h1><div class="sub">路线按《联合商城》顺序逐额度规划；成本直接使用材料库的最新参考价，全部按高品质交付计算。80 级以下理符始终按原经验计算；达到 90 级后，90 以下理符不再计入经验。</div></div></div><section class="leve-controls"><label>职业<select id="leve-job">${(levequests.jobs || []).map(job => `<option value="${job}" ${job === state.leveJob ? 'selected' : ''}>${job}</option>`).join('')}</select></label><label>当前等级<input id="leve-start" type="number" min="1" max="99" step="1" value="${start}"></label><label>目标等级<input id="leve-target" type="number" min="2" max="100" step="1" value="${target}"></label><label class="leve-double"><input id="leve-double" type="checkbox" ${state.leveDouble ? 'checked' : ''}>服务器双倍经验</label></section>${validRange ? '' : '<p class="status">目标等级必须大于当前等级，且范围为 1–100 级。</p>'}<div class="cards leve-summary"><article class="card"><small>升级所需经验</small><b>${moneyFormatter.format(plan.requiredExperience)}</b><div class="meta">${start} → ${target} 级</div></article><article class="card"><small>计划理符额度</small><b>${summary.allowances}</b><div class="meta">按经验自动收缩</div></article><article class="card"><small>计划交付物总数</small><b>${summary.quantity}</b></article><article class="card"><small>计划获得经验</small><b>${moneyFormatter.format(plan.plannedExperience)}</b><div class="meta">${experienceStatus} · HQ ×2${state.leveDouble ? ' · 服务器 ×2' : ''}${summary.unverified ? ` · ${summary.unverified} 项等待核验` : ''}</div></article><article class="card"><small>预计交付成本</small><b>${summary.pending ? '等待补价' : money(summary.cost)}</b><div class="meta">${summary.pending ? `${summary.pending} 项等待补价，未计入总计` : '按计划交付数递归计算'}</div></article></div><div class="table-wrap"><table class="ledger leve-ledger"><thead><tr><th>顺序</th><th>等级</th><th>交付物</th><th>计划数量 / 理符额度</th><th>经验</th><th>当前成本</th><th>理符任务与地点</th></tr></thead><tbody>${rows || `<tr><td colspan="7" class="empty">${validRange ? '该等级范围暂无已导入路线。' : '请先填写有效等级范围。'}</td></tr>`}</tbody></table></div>`;
+    root.innerHTML = `<div class="header"><div><div class="meta">理符售卖 · 生产职业升级规划</div><h1>理符升级推荐</h1><div class="sub">方案一严格依据 7.0 制作理符攻略：服务器双倍开启时使用对应的双倍经验表。成本直接使用材料库的最新参考价，全部按高品质交付计算。</div></div></div><section class="leve-controls"><label>职业<select id="leve-job">${(levequests.jobs || []).map(job => `<option value="${job}" ${job === state.leveJob ? 'selected' : ''}>${job}</option>`).join('')}</select></label><label>当前等级<input id="leve-start" type="number" min="20" max="99" step="1" value="${start}"></label><label>目标等级<input id="leve-target" type="number" min="21" max="100" step="1" value="${target}"></label><label class="leve-double"><input id="leve-double" type="checkbox" ${state.leveDouble ? 'checked' : ''}>服务器双倍经验</label></section>${validRange ? '' : '<p class="status">攻略范围为 20–100 级，目标等级必须高于当前等级。</p>'}<div class="cards leve-summary"><article class="card"><small>升级所需经验</small><b>${moneyFormatter.format(plan.requiredExperience)}</b><div class="meta">${start} → ${target} 级</div></article><article class="card"><small>计划理符额度</small><b>${summary.allowances}</b><div class="meta">按所选方案表</div></article><article class="card"><small>计划交付物总数</small><b>${summary.quantity}</b></article><article class="card"><small>计划获得经验</small><b>${moneyFormatter.format(plan.plannedExperience)}</b><div class="meta">${experienceStatus} · HQ ×2${state.leveDouble ? ' · 服务器 ×2' : ''}${summary.unverified ? ` · ${summary.unverified} 项等待核验` : ''}</div></article><article class="card"><small>预计交付成本</small><b>${summary.pending ? '等待补价' : money(summary.cost)}</b><div class="meta">${summary.pending ? `${summary.pending} 项等待补价，未计入总计` : '递归计算'}</div></article></div><div class="table-wrap"><table class="ledger leve-ledger"><thead><tr><th>等级</th><th>理符任务</th><th>所需道具</th><th>物品数量</th><th>理符额度</th><th>经验</th><th>当前成本</th><th>接取地点</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="empty">${validRange ? '该等级范围暂无已导入路线。' : '请先填写有效等级范围。'}</td></tr>`}</tbody></table></div>`;
+    // 完整生产理符库与当前方案分离：系统方案可恢复，自定义方案只保存在本机。
+    root.querySelector('#leve-start').min = '1';
+    root.querySelector('#leve-target').min = '2';
+    root.querySelector('.header .sub').textContent = '系统方案一使用 7.0 的 20–100 级推荐路线；自定义方案可从完整生产理符库添加 1–100 级任务。全部按高品质交付计算，达到 90 级后，90 以下理符不再计入经验。';
+    const activePlan = activeLevePlan();
+    const controls = root.querySelector('.leve-controls');
+    const planSelector = document.createElement('label');
+    planSelector.className = 'leve-plan-selector';
+    planSelector.innerHTML = `理符方案<select id="leve-plan">${levePlans.map(plan => `<option value="${plan.id}" ${plan.id === activePlan.id ? 'selected' : ''}>${plan.name}</option>`).join('')}</select>`;
+    controls.prepend(planSelector);
+    const planActions = document.createElement('div');
+    planActions.className = 'leve-plan-actions';
+    planActions.innerHTML = `<button class="btn secondary" id="leve-plan-edit">${state.levePlanEditing ? '完成编辑' : '编辑方案'}</button><button class="btn secondary" id="leve-plan-create">+ 新建方案</button>${activePlan.system ? '<button class="btn secondary" id="leve-plan-restore">恢复系统默认</button>' : '<button class="btn secondary" id="leve-plan-delete">删除方案</button>'}`;
+    controls.append(planActions);
+    if (state.levePlanEditing) {
+      const search = state.leveCatalogSearch.trim().toLocaleLowerCase('zh-CN');
+      const selectedIds = new Set(activePlan.entries.map(entry => String(entry.leveId)));
+      const versionGroups = [
+        ['2.0', '重生之境'], ['3.0', '苍穹之禁城'], ['4.0', '红莲之狂潮'],
+        ['5.0', '暗影之逆焰'], ['6.0', '晓月之终途'], ['7.0', '金曦之遗辉'], ['unverified', '待核验']
+      ];
+      const catalogRoutes = (leveCatalog.routes || []).filter(route => route.job === state.leveJob
+        && (!search || `${route.level} ${route.quest} ${route.item}`.toLocaleLowerCase('zh-CN').includes(search)))
+        .sort((left, right) => versionGroups.findIndex(([key]) => key === left.expansion) - versionGroups.findIndex(([key]) => key === right.expansion) || left.level - right.level || left.leveId - right.leveId);
+      const editor = document.createElement('section');
+      editor.className = 'leve-plan-catalog';
+      editor.innerHTML = `<div class="header"><div><h2>理符库 · ${state.leveJob}</h2><div class="sub">按版本分类；已加入当前方案的理符会高亮显示。</div></div><b>${catalogRoutes.length} 条</b></div><input id="leve-catalog-search" placeholder="搜索任务、所需道具或等级" value="${state.leveCatalogSearch}"><div class="leve-plan-list"><div class="leve-plan-columns"><span></span><span>理符任务</span><span>所需道具</span><span>经验值</span></div>${versionGroups.map(([key, title]) => {
+        const routes = catalogRoutes.filter(route => (route.expansion || 'unverified') === key);
+        const open = Boolean(search) || state.leveCatalogCollapsed[key] === false;
+        return routes.length ? `<details class="leve-plan-version" data-leve-version="${key}" ${open ? 'open' : ''}><summary>${title}<small>${routes.length} 条</small></summary>${routes.map(route => {
+          const selected = selectedIds.has(leveCatalogKey(route));
+          const itemIcon = Number(route.itemIcon || 0) > 0 ? `<img class="item-icon leve-plan-item-icon" src="https://www.garlandtools.org/files/icons/item/${Number(route.itemIcon)}.png" alt="" aria-hidden="true" loading="lazy" decoding="async" onerror="this.remove()">` : '';
+          return `<div class="leve-plan-row ${selected ? 'is-selected' : ''}"><button class="leve-plan-dot ${selected ? 'selected' : 'add'}" ${selected ? 'disabled' : `data-leve-plan-toggle="${route.leveId}"`} title="${selected ? '已加入当前方案' : `添加 ${route.item}`}" aria-label="${selected ? '已加入当前方案' : `添加 ${route.item}`}">${selected ? '✓' : '+'}</button><span class="leve-plan-task"><b>${route.quest}</b><small>Lv.${route.level} · ${route.submissionsPerAllowance} 次 / 额度</small></span><span class="leve-plan-item">${itemIcon}<span>${route.item}</span></span><b class="leve-plan-xp">${moneyFormatter.format(route.experiencePerSubmission || 0)}</b></div>`;
+        }).join('')}</details>` : '';
+      }).join('') || '<p class="empty">没有匹配的理符。</p>'}</div>`;
+      const tableWrap = root.querySelector('.leve-ledger')?.closest('.table-wrap');
+      if (tableWrap) {
+        const layout = document.createElement('section');
+        layout.className = 'leve-plan-edit-layout';
+        tableWrap.replaceWith(layout); layout.append(tableWrap, editor);
+        const ledger = layout.querySelector('.leve-ledger');
+        const rows = leveRouteRows();
+        if (rows.length) {
+          ledger.tHead.rows[0].insertCell().outerHTML = '<th>编辑</th>';
+          Array.from(ledger.tBodies[0].rows).forEach((row, index) => {
+            const route = rows[index];
+            if (!route) return;
+            const cell = row.insertCell();
+            cell.innerHTML = `<label class="leve-plan-allowance">额度<input type="number" min="1" step="1" value="${route.routeAllowances}" data-leve-plan-allowance="${route.leveId}"></label><button class="leve-plan-remove" data-leve-plan-remove="${route.leveId}" title="移除 ${route.quest}" aria-label="移除 ${route.quest}">移除</button>`;
+          });
+        }
+      }
+      editor.querySelector('#leve-catalog-search').oninput = event => { state.leveCatalogSearch = event.currentTarget.value; renderLeve(); };
+      editor.querySelectorAll('[data-leve-version]').forEach(group => group.ontoggle = event => {
+        state.leveCatalogCollapsed[event.currentTarget.dataset.leveVersion] = !event.currentTarget.open;
+      });
+      root.querySelectorAll('[data-leve-plan-toggle]').forEach(button => button.onclick = () => {
+        const leveId = Number(button.dataset.levePlanToggle);
+        activePlan.entries = selectedIds.has(String(leveId)) ? activePlan.entries.filter(entry => Number(entry.leveId) !== leveId) : [...activePlan.entries, { leveId, allowances: 1 }];
+        saveLevePlans(); renderLeve();
+      });
+      root.querySelectorAll('[data-leve-plan-remove]').forEach(button => button.onclick = () => {
+        const route = (leveCatalog.routes || []).find(item => Number(item.leveId) === Number(button.dataset.levePlanRemove));
+        if (!route || !confirm(`确认从“${activePlan.name}”移除理符？\n\n${route.quest}\n所需道具：${route.item}`)) return;
+        activePlan.entries = activePlan.entries.filter(entry => Number(entry.leveId) !== Number(button.dataset.levePlanRemove)); saveLevePlans(); renderLeve();
+      });
+      root.querySelectorAll('[data-leve-plan-allowance]').forEach(input => input.onchange = event => {
+        const entry = activePlan.entries.find(item => Number(item.leveId) === Number(event.currentTarget.dataset.levePlanAllowance));
+        if (entry) entry.allowances = Math.max(1, Number(event.currentTarget.value || 1)); saveLevePlans(); renderLeve();
+      });
+    }
+    root.querySelector('#leve-plan').onchange = event => { activeLevePlanId = event.currentTarget.value; state.leveCatalogSearch = ''; saveLevePlans(); renderLeve(); };
+    root.querySelector('#leve-plan-edit').onclick = () => { state.levePlanEditing = !state.levePlanEditing; state.leveCatalogSearch = ''; renderLeve(); };
+    root.querySelector('#leve-plan-create').onclick = () => {
+      const name = prompt('新方案名称', `方案${levePlans.length + 1}`)?.trim();
+      if (!name) return;
+      const id = `custom-${Date.now()}`;
+      levePlans.push({ id, name, system: false, entries: activePlan.entries.map(entry => ({ ...entry })) }); activeLevePlanId = id; state.levePlanEditing = true; saveLevePlans(); renderLeve();
+    };
+    root.querySelector('#leve-plan-restore')?.addEventListener('click', () => {
+      if (!confirm('恢复方案一的系统默认路线？当前对方案一的调整会被覆盖。')) return;
+      activePlan.entries = systemLevePlanEntries(); saveLevePlans(); renderLeve();
+    });
+    root.querySelector('#leve-plan-delete')?.addEventListener('click', () => {
+      if (!confirm(`删除“${activePlan.name}”？此操作不可恢复。`)) return;
+      levePlans = levePlans.filter(plan => plan.id !== activePlan.id); activeLevePlanId = levePlans[0].id; state.levePlanEditing = false; saveLevePlans(); renderLeve();
+    });
     root.querySelectorAll('#leve-job,#leve-start,#leve-target,#leve-double').forEach(input => input.onchange = () => {
-      state.leveJob = root.querySelector('#leve-job').value; state.leveStart = Number(root.querySelector('#leve-start').value || 0); state.leveTarget = Number(root.querySelector('#leve-target').value || 0); state.leveDouble = root.querySelector('#leve-double').checked; renderLeve();
+      const previousDouble = state.leveDouble;
+      state.leveJob = root.querySelector('#leve-job').value; state.leveStart = Number(root.querySelector('#leve-start').value || 0); state.leveTarget = Number(root.querySelector('#leve-target').value || 0); state.leveDouble = root.querySelector('#leve-double').checked;
+      if (previousDouble !== state.leveDouble && activeLevePlan()?.system) { activeLevePlan().entries = systemLevePlanEntries(); activeLevePlan().planVersion = systemLevePlanVersion; saveLevePlans(); }
+      renderLeve();
     });
     root.querySelectorAll('[data-leve-detail]').forEach(button => button.onclick = () => openLeveRecipeReference(button.dataset.leveDetail, true));
   }

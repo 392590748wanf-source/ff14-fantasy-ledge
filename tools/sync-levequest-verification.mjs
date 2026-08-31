@@ -13,6 +13,7 @@ import vm from 'node:vm';
 
 const root = resolve(import.meta.dirname, '..');
 const garlandBase = 'https://www.garlandtools.org/db/doc';
+const xivApiBase = 'https://xivapi-v2.xivcdn.com';
 const jobWikiPages = {
   '刻木匠': '刻木匠', '锻铁匠': '锻铁匠', '铸甲匠': '铸甲匠', '雕金匠': '雕金匠',
   '制革匠': '制革匠', '裁衣匠': '裁衣匠', '炼金术士': '炼金术士', '烹饪师': '烹调师'
@@ -48,6 +49,10 @@ const normalize = value => String(value || '').replace(/[（）()【】\[\]\s·�
 const routeKey = route => [route.job, route.level, normalize(route.quest), normalize(route.item)].join('|');
 const wikiUrl = route => `https://ff14.huijiwiki.com/wiki/${encodeURIComponent(jobWikiPages[route.job] || route.job)}`;
 const garlandUrl = id => `${garlandBase}/leve/en/3/${id}.json`;
+const xivItemUrl = id => `${xivApiBase}/api/sheet/Item/${id}?fields=Name,Icon,LevelEquip&language=chs`;
+const xivSearchUrl = name => `${xivApiBase}/api/search?${new URLSearchParams({
+  sheets: 'Item', fields: 'Name,Icon,LevelEquip', query: `Name="${name}"`, language: 'chs'
+})}`;
 
 await mkdir(cacheDir, { recursive: true });
 const fetchJson = async (url, key) => {
@@ -83,7 +88,29 @@ itemIndex.forEach(([id, name]) => {
 });
 const leveDataset = (await evaluateDataset('levequests.js')).FF14_LEVEQUESTS || { routes: [] };
 const routes = leveDataset.routes || [];
-const idsForRoute = route => leveItemAliases.get(normalize(route.item)) || itemIdsByName.get(normalize(route.item)) || [];
+const indexedIdsForRoute = route => leveItemAliases.get(normalize(route.item)) || itemIdsByName.get(normalize(route.item)) || [];
+// XIVAPI 使用国服客户端名称。仅当本地索引找不到候选时才做精确名称搜索，
+// 控制请求量，并避免将同名物品直接当成已核验交付物。
+const xivSearches = new Map();
+const routesWithoutIndexedId = routes.filter(route => !indexedIdsForRoute(route).length);
+await pool(routesWithoutIndexedId, 4, async route => {
+  const key = routeKey(route);
+  try {
+    const response = await fetchJson(xivSearchUrl(route.item), `xivapi-search-${encodeURIComponent(normalize(route.item))}`);
+    const candidates = (response.results || []).map(row => ({
+      id: Number(row.row_id), name: row.fields?.Name || '', icon: Number(row.fields?.Icon?.id || 0) || null,
+      level: Number(row.fields?.LevelEquip || 0) || null
+    })).filter(candidate => candidate.id > 0);
+    xivSearches.set(key, { status: candidates.length ? 'candidates' : 'not-found', candidates });
+  } catch (error) {
+    xivSearches.set(key, { status: 'fetch-failed', candidates: [], reason: error.message });
+  }
+});
+const idsForRoute = route => {
+  const indexed = indexedIdsForRoute(route);
+  if (indexed.length) return indexed;
+  return (xivSearches.get(routeKey(route))?.candidates || []).map(candidate => candidate.id);
+};
 const idsNeeded = [...new Set(routes.flatMap(idsForRoute))];
 const itemDocs = new Map();
 await pool(idsNeeded, 6, async id => itemDocs.set(id, await fetchJson(`${garlandBase}/item/en/3/${id}.json`, `item-${id}`)));
@@ -93,6 +120,20 @@ await pool(idsNeeded, 6, async id => itemDocs.set(id, await fetchJson(`${garland
 const leveIds = [...new Set([...itemDocs.values()].flatMap(doc => doc.item?.requiredByLeves || []))];
 const leveDocs = new Map();
 await pool(leveIds, 8, async id => leveDocs.set(Number(id), await fetchJson(garlandUrl(id), `leve-${id}`)));
+
+const xivItems = new Map();
+await pool(idsNeeded, 6, async id => {
+  try {
+    const response = await fetchJson(xivItemUrl(id), `xivapi-item-${id}`);
+    const fields = response.fields || {};
+    xivItems.set(id, {
+      status: 'verified', id: Number(response.row_id || id), name: fields.Name || '',
+      icon: Number(fields.Icon?.id || 0) || null, level: Number(fields.LevelEquip || 0) || null
+    });
+  } catch (error) {
+    xivItems.set(id, { status: 'fetch-failed', id: Number(id), name: '', icon: null, level: null, reason: error.message });
+  }
+});
 
 const entries = routes.map(route => {
   const itemIds = idsForRoute(route);
@@ -110,16 +151,23 @@ const entries = routes.map(route => {
   const selected = repetitionMatches.length === 1 ? repetitionMatches[0] : (unique.length === 1 ? unique[0] : null);
   const manualExperience = manualWikiExperience.get(normalize(route.quest));
   const status = selected ? 'garland-verified' : manualExperience ? 'wiki-manual-verified' : unique.length ? 'ambiguous' : itemIds.length ? 'unmatched' : 'item-unmatched';
+  const resolvedItemId = selected?.itemId || (itemIds.length === 1 ? itemIds[0] : null);
+  const xiv = resolvedItemId ? xivItems.get(Number(resolvedItemId)) || null : null;
+  const xivNameVariant = Boolean(xiv?.name && normalize(xiv.name) !== normalize(route.item));
   return {
     key: routeKey(route), job: route.job, level: route.level, quest: route.quest, item: route.item,
     // 交付物 ID 同样属于核验结果：页面图标、配方成本和材料指导价均只能使用此 ID，
     // 不能在客户端根据中文名猜测。
-    itemIds, itemId: selected?.itemId || (itemIds.length === 1 ? itemIds[0] : null), itemIcon: Number(itemDocs.get(selected?.itemId || (itemIds.length === 1 ? itemIds[0] : 0))?.item?.icon || 0) || null, leveId: selected?.leveId || null, experiencePerSubmission: selected?.doc?.xp || manualExperience || null,
+    itemIds, itemId: resolvedItemId, itemIcon: Number(itemDocs.get(resolvedItemId)?.item?.icon || 0) || null, leveId: selected?.leveId || null, experiencePerSubmission: selected?.doc?.xp || manualExperience || null,
     garlandUrl: selected ? garlandUrl(selected.leveId) : '', wikiUrl: wikiUrl(route),
     expectedSubmissions, verifiedSubmissions: expectedSubmissions,
     status, wikiStatus: 'pending-manual-check',
+    xivApi: xiv ? { status: xiv.status, id: xiv.id, name: xiv.name, icon: xiv.icon, level: xiv.level, nameVariant: xivNameVariant, reason: xiv.reason || '' } : {
+      status: xivSearches.get(routeKey(route))?.status || 'not-queried', id: null, name: '', icon: null, level: null,
+      nameVariant: false, reason: xivSearches.get(routeKey(route))?.reason || ''
+    },
     note: selected
-      ? 'Garland 已核验交付物、等级与基础经验；灰机 Wiki API 当前不可自动读取，保留来源链接待人工复核。'
+      ? `Garland 已核验交付物、等级与基础经验；XIVAPI 中文${xiv?.status === 'verified' ? (xivNameVariant ? '名称存在译名差异，理符名称按路线保留；' : '物品名称与图标已核对；') : '资料待获取；'}灰机 Wiki API 当前不可自动读取，保留来源链接待人工复核。`
       : manualExperience
         ? '已按灰机 Wiki 理符列表人工核对每次交付基础经验；Garland 无法唯一匹配该国服路线。'
       : (unique.length ? `Garland 存在 ${unique.length} 个同等级候选任务，需人工匹配。` : '未能从 Garland 交付物索引唯一匹配任务。')
@@ -132,13 +180,19 @@ const grouped = entries.reduce((result, entry) => {
 const audit = {
   schema: 1, generatedAt: new Date().toISOString(), sources: {
     garland: garlandBase, wiki: 'https://ff14.huijiwiki.com/wiki/理符任务',
-    wikiFetch: 'blocked-by-cloudflare'
+    wikiFetch: 'blocked-by-cloudflare', xivApi: xivApiBase, xivApiLanguage: 'chs'
   },
   total: entries.length,
   counts: Object.fromEntries(Object.entries(grouped).map(([status, rows]) => [status, rows.length])),
   entries
 };
 await writeFile(resolve(root, 'levequest-verification.js'), `// 自动生成：tools/sync-levequest-verification.mjs。\nwindow.FF14_LEVEQUEST_VERIFICATION=${JSON.stringify(audit)};\n`, 'utf8');
+const xivAudit = {
+  schema: 1, generatedAt: audit.generatedAt,
+  source: { api: xivApiBase, language: 'chs', itemFields: ['Name', 'Icon', 'LevelEquip'] },
+  entries: entries.map(entry => ({ key: entry.key, routeName: entry.item, itemId: entry.itemId, xivApi: entry.xivApi }))
+};
+await writeFile(resolve(root, 'levequest-xivapi-verification.js'), `// 自动生成：tools/sync-levequest-verification.mjs。\nwindow.FF14_LEVEQUEST_XIVAPI_VERIFICATION=${JSON.stringify(xivAudit)};\n`, 'utf8');
 // 工作簿可能不在当前工作区。同步后直接回写已核验字段，确保图标、
 // 配方和成本资料在无需重新导入工作簿时也能立即使用。
 const entriesByKey = new Map(entries.map(entry => [entry.key, entry]));
@@ -153,6 +207,7 @@ const refreshedRoutes = routes.map(route => {
     verified: entry.status === 'garland-verified' || entry.status === 'wiki-manual-verified',
     verificationStatus: entry.status,
     wikiStatus: entry.wikiStatus,
+    xivApi: entry.xivApi,
     garlandUrl: entry.garlandUrl,
     wikiUrl: entry.wikiUrl,
     verificationNote: entry.note

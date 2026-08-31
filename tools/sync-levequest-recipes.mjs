@@ -7,9 +7,10 @@ const root = resolve(import.meta.dirname, '..');
 const cacheDir = resolve(root, 'tools', '.cache', 'levequest-recipes');
 const garlandBase = 'https://www.garlandtools.org/db/doc/item/en/3';
 const evaluate = async file => { const context = { window: {} }; vm.runInNewContext(await readFile(resolve(root, file), 'utf8'), context, { filename: file }); return context.window; };
-const [leveData, itemData] = await Promise.all([evaluate('levequests.js'), evaluate('item-index.js')]);
+const [leveData, catalogData, itemData] = await Promise.all([evaluate('levequests.js'), evaluate('levequest-catalog.js'), evaluate('item-index.js')]);
 const names = new Map((itemData.FF14_ITEM_INDEX || []).map(([id, name]) => [String(id), name]));
-const verifiedRoutes = (leveData.FF14_LEVEQUESTS?.routes || []).filter(route => route.verified && Number(route.itemId) > 0);
+const verifiedRoutes = (catalogData.FF14_LEVEQUEST_CATALOG?.routes || leveData.FF14_LEVEQUESTS?.routes || [])
+  .filter(route => route.verified && Number(route.itemId) > 0);
 const roots = [...new Set(verifiedRoutes.map(route => String(route.itemId)))];
 // 理符路线名称优先于通用物品索引，避免已核验的国服本地化名称在
 // 制作流程窗口中被英文数据源的另一中文译名覆盖。

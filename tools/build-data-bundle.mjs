@@ -39,7 +39,7 @@ await execute(presetSandbox, 'nbb-preset.js');
 if (!presetSandbox.nbbData) throw new Error('无法读取 nbb-preset.js 中的内置装备数据。');
 
 const sandbox = createSandbox();
-for (const file of ['base-materials.js', 'submarine-data.js', 'hqhelper-fallback.js', 'retainer-data.js', 'material-sources.js', 'craft-scrip-data.js', 'craft-scrips.js', 'levequests.js', 'levequest-recipes.js', 'levequest-material-sources.js']) {
+for (const file of ['base-materials.js', 'submarine-data.js', 'hqhelper-fallback.js', 'retainer-data.js', 'material-sources.js', 'craft-scrip-data.js', 'craft-scrips.js', 'levequests.js', 'levequest-catalog.js', 'levequest-recipes.js', 'levequest-material-sources.js']) {
   await execute(sandbox, file);
 }
 
@@ -123,6 +123,7 @@ const bundle = {
     exchangeSources: sandbox.window.FF14_EXCHANGE_SOURCES,
     craftScrips: sandbox.window.FF14_CRAFT_SCRIPS,
     levequests: sandbox.window.FF14_LEVEQUESTS,
+    levequestCatalog: sandbox.window.FF14_LEVEQUEST_CATALOG,
     levequestRecipes: sandbox.window.FF14_LEVEQUEST_RECIPES,
     levequestMaterialSources: sandbox.window.FF14_LEVEQUEST_MATERIAL_SOURCES,
     materialSourceAudit: { equipment: equipmentSourceAudit(), craftScrips: craftScripAudit(), levequests: levequestSourceAudit() }

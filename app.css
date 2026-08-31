@@ -384,6 +384,25 @@ dialog::backdrop, #bundle-detail-dialog::backdrop { background: #00000024; }
 .leve-controls .leve-double { display:flex; align-items:center; gap:7px; padding:8px 0; color:var(--ink); font-size:14px; }
 .leve-controls .leve-double input { width:auto; margin:0; }
 .leve-summary .card b { font-variant-numeric:tabular-nums; }
+.leve-plan-selector { min-width:210px; }
+.leve-plan-selector select { min-width:210px; }
+.leve-plan-actions { display:flex; gap:7px; flex-wrap:wrap; }
+.leve-plan-edit-layout { display:grid; grid-template-columns:minmax(0,2fr) minmax(320px,.9fr); gap:14px; align-items:start; margin-top:16px; }
+.leve-plan-edit-layout .table-wrap { margin:0; }
+.leve-plan-catalog { min-width:0; padding:14px; border:1px solid var(--line); border-radius:9px; background:#fff; }
+.leve-plan-catalog h2 { margin:0; font-size:15px; }.leve-plan-catalog .header { align-items:center; }
+.leve-plan-catalog input#leve-catalog-search { width:100%; margin:12px 0 8px; padding:8px; border:1px solid var(--line-strong); border-radius:6px; font:inherit; }
+.leve-plan-list { max-height:440px; overflow:auto; border-top:1px solid var(--line); }
+.leve-plan-columns,.leve-plan-row { display:grid; grid-template-columns:26px minmax(130px,1.35fr) minmax(90px,1fr) minmax(72px,.7fr); align-items:center; gap:8px; }
+.leve-plan-columns { position:sticky; top:0; z-index:3; padding:8px 4px; border-bottom:1px solid var(--line-strong); background:#f7faf9; color:var(--muted); font-family:"Microsoft YaHei UI","Microsoft YaHei",sans-serif; font-size:12px; font-weight:600; }
+.leve-plan-version { margin:0; }.leve-plan-version summary { position:sticky; top:33px; z-index:2; display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 3px 6px; color:var(--ink); font-size:13px; border-bottom:1px solid var(--line); background:#fff; cursor:pointer; list-style:none; }.leve-plan-version summary::-webkit-details-marker { display:none; }.leve-plan-version summary::before { content:'▾'; margin-right:4px; color:var(--muted); }.leve-plan-version:not([open]) summary::before { content:'▸'; }.leve-plan-version summary small { margin-left:auto; color:var(--muted); font-weight:400; }
+.leve-plan-row { padding:8px 4px; border-bottom:1px solid #edf1f3; }
+.leve-plan-row>span { min-width:0; }.leve-plan-task { font-family:"Microsoft YaHei UI","Microsoft YaHei",sans-serif; font-size:14px; font-weight:500; line-height:1.35; }.leve-plan-task b { font-weight:600; }.leve-plan-row small { display:block; margin-top:2px; overflow:hidden; color:var(--muted); font-size:11px; font-weight:400; text-overflow:ellipsis; white-space:nowrap; }.leve-plan-item,.leve-plan-xp { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.leve-plan-item { display:flex; align-items:center; gap:6px; font-family:"Microsoft YaHei UI","Microsoft YaHei",sans-serif; font-size:14px; font-weight:500; }.leve-plan-item-icon { width:20px; height:20px; flex:0 0 20px; }.leve-plan-xp { color:#244554; font-family:"Microsoft YaHei UI","Microsoft YaHei",sans-serif; font-size:14px; font-weight:600; font-variant-numeric:tabular-nums; text-align:right; }
+.leve-plan-row label { display:flex; align-items:center; gap:4px; color:var(--muted); font-size:12px; }.leve-plan-row label input { width:58px; padding:5px; border:1px solid var(--line-strong); border-radius:5px; text-align:center; font:inherit; }
+.leve-plan-row.is-selected { background:#e7f6f1; box-shadow:inset 3px 0 #1a9975; }.leve-plan-dot { display:inline-grid; place-items:center; width:23px; height:23px; border:1px solid #9bbfc6; border-radius:50%; background:#fff; color:#176d79; font-weight:700; cursor:pointer; }.leve-plan-dot.add { color:#18724f; border-color:#8ec7a8; }.leve-plan-dot.selected { border-color:#219975; background:#219975; color:#fff; cursor:default; opacity:.8; }
+.leve-plan-allowance { display:inline-flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap; }.leve-plan-allowance input { width:48px; padding:4px; }.leve-plan-remove { margin-left:5px; border:1px solid #d4aaa5; border-radius:5px; background:#fff; color:#af514a; cursor:pointer; }
+@media (max-width:1100px) { .leve-plan-edit-layout { grid-template-columns:1fr; }.leve-plan-list { max-height:330px; } }
 .leve-ledger td { vertical-align:middle; }
 .leve-ledger small { color:var(--muted); white-space:normal; }
+.leve-metric { position:relative; display:inline-block; cursor:help; font-variant-numeric:tabular-nums; }.leve-metric::after { position:absolute; z-index:20; bottom:calc(100% + 7px); left:50%; width:max-content; max-width:260px; padding:7px 9px; border-radius:6px; background:#25343a; color:#fff; content:attr(data-tooltip); font-size:12px; font-weight:400; line-height:1.45; opacity:0; pointer-events:none; transform:translate(-50%,4px); transition:opacity .12s ease,transform .12s ease; white-space:normal; }.leve-metric:hover::after,.leve-metric:focus::after { opacity:1; transform:translate(-50%,0); }
 @media (max-width: 700px) { .leve-controls { display:grid; grid-template-columns:1fr 1fr; } .leve-controls select,.leve-controls input[type="number"] { min-width:0; width:100%; } }

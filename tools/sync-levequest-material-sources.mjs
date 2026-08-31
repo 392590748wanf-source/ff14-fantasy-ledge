@@ -13,14 +13,14 @@ const evaluate = async file => {
   vm.runInNewContext(await readFile(resolve(root, file), 'utf8'), context, { filename: file });
   return context.window;
 };
-const [leveData, recipeData, sourceData] = await Promise.all([
-  evaluate('levequests.js'), evaluate('levequest-recipes.js'), evaluate('material-sources.js')
+const [leveData, catalogData, recipeData, sourceData] = await Promise.all([
+  evaluate('levequests.js'), evaluate('levequest-catalog.js'), evaluate('levequest-recipes.js'), evaluate('material-sources.js')
 ]);
 const recipes = recipeData.FF14_LEVEQUEST_RECIPES || {};
 const itemNames = recipes.items || {};
 const materialSourceOverrides = sourceData.FF14_MATERIAL_SOURCES || {};
 const exchanges = sourceData.FF14_EXCHANGE_SOURCES?.routes || [];
-const routes = (leveData.FF14_LEVEQUESTS?.routes || [])
+const routes = (catalogData.FF14_LEVEQUEST_CATALOG?.routes || leveData.FF14_LEVEQUESTS?.routes || [])
   .filter(route => route.verified && /^\d+$/.test(String(route.itemId || '')));
 const roots = [...new Set(routes.map(route => String(route.itemId)))];
 const reachable = new Set();
