@@ -441,7 +441,8 @@ window.addEventListener('load', async () => {
   const leveCatalog = window.FF14_LEVEQUEST_CATALOG || { jobs: levequests.jobs || [], routes: levequests.routes || [], audit: {} };
   const levePlanStorageKey = 'ff14-leve-plans';
   const leveCatalogKey = route => String(route?.leveId || '');
-  const systemLevePlanVersion = 2;
+  // 版本 3：方案一清理 20 级以下的旧版本机路线。
+  const systemLevePlanVersion = 3;
   const systemLevePlanEntries = () => {
     const variant = state.leveDouble ? 'double' : 'normal';
     return (leveCatalog.routes || []).filter(route => Number(route.systemPlan?.[variant] || 0) > 0)
@@ -3452,7 +3453,7 @@ window.addEventListener('load', async () => {
         ['5.0', '暗影之逆焰'], ['6.0', '晓月之终途'], ['7.0', '金曦之遗辉'], ['unverified', '待核验']
       ];
       const catalogRoutes = (leveCatalog.routes || []).filter(route => route.job === state.leveJob
-        && (!search || `${route.level} ${route.quest} ${route.item}`.toLocaleLowerCase('zh-CN').includes(search)))
+        && (!search || `${route.quest} ${route.item}`.toLocaleLowerCase('zh-CN').includes(search)))
         .sort((left, right) => versionGroups.findIndex(([key]) => key === left.expansion) - versionGroups.findIndex(([key]) => key === right.expansion) || left.level - right.level || left.leveId - right.leveId);
       const editor = document.createElement('section');
       editor.className = 'leve-plan-catalog';
@@ -3482,14 +3483,31 @@ window.addEventListener('load', async () => {
           });
         }
       }
-      editor.querySelector('#leve-catalog-search').oninput = event => { state.leveCatalogSearch = event.currentTarget.value; renderLeve(); };
+      const updateCatalogSearch = input => {
+        const value = input.value, selectionStart = input.selectionStart, selectionEnd = input.selectionEnd;
+        state.leveCatalogSearch = value;
+        renderLeve();
+        const nextInput = root.querySelector('#leve-catalog-search');
+        if (!nextInput) return;
+        nextInput.focus({ preventScroll: true });
+        nextInput.setSelectionRange(selectionStart, selectionEnd);
+      };
+      const catalogSearchInput = editor.querySelector('#leve-catalog-search');
+      catalogSearchInput.oninput = event => {
+        // 中文输入法在候选组词期间会连续触发 input；此时重绘会中断组词。
+        if (!event.isComposing) updateCatalogSearch(event.currentTarget);
+      };
+      catalogSearchInput.oncompositionend = event => updateCatalogSearch(event.currentTarget);
       editor.querySelectorAll('[data-leve-version]').forEach(group => group.ontoggle = event => {
         state.leveCatalogCollapsed[event.currentTarget.dataset.leveVersion] = !event.currentTarget.open;
       });
       root.querySelectorAll('[data-leve-plan-toggle]').forEach(button => button.onclick = () => {
         const leveId = Number(button.dataset.levePlanToggle);
+        const catalogScrollTop = editor.querySelector('.leve-plan-list')?.scrollTop || 0;
         activePlan.entries = selectedIds.has(String(leveId)) ? activePlan.entries.filter(entry => Number(entry.leveId) !== leveId) : [...activePlan.entries, { leveId, allowances: 1 }];
         saveLevePlans(); renderLeve();
+        const nextCatalogList = root.querySelector('.leve-plan-list');
+        if (nextCatalogList) nextCatalogList.scrollTop = catalogScrollTop;
       });
       root.querySelectorAll('[data-leve-plan-remove]').forEach(button => button.onclick = () => {
         const route = (leveCatalog.routes || []).find(item => Number(item.leveId) === Number(button.dataset.levePlanRemove));
