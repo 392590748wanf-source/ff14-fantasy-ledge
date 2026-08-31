@@ -31,7 +31,8 @@ body { margin: 0; background: var(--surface); color: var(--ink); font: 14px "Mic
 .update-panel h3, .update-panel p { margin: 0; }
 .update-panel h3 { font-size: 15px; }
 .update-panel p { min-height: 20px; }
-.app-contextbar { display: flex; min-height: 39px; padding: 0 28px; border-bottom: 1px solid var(--line); background: #fff; }
+.app-contextbar { display: none; min-height: 39px; padding: 0 28px; border-bottom: 1px solid var(--line); background: #fff; }
+.app-contextbar.has-open-nav { display: flex; }
 .context-nav { display: none; align-items: center; gap: 6px; padding: 0; }
 .context-nav.open { display: flex; }
 .context-nav button { padding: 5px 8px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); font: 12px "Microsoft YaHei", sans-serif; cursor: pointer; }
@@ -44,6 +45,51 @@ body { margin: 0; background: var(--surface); color: var(--ink); font: 14px "Mic
 .equipment-type-nav button:active { background: transparent; box-shadow: none; }
 .equipment-type-nav button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .equipment-page-actions { display: flex; align-items: end; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
+.trade-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.trade-category-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
+.trade-category-section { min-width: 0; margin: 0; }
+.trade-category-section h2 { margin: 0; padding: 5px 6px; border: 1px solid var(--line-strong); border-bottom: 0; background: var(--surface-soft); font-size: 14px; }
+.trade-category-section .table-wrap { margin-top: 0; overflow: hidden; }
+.trade-ledger { width: 100%; min-width: 0; table-layout: fixed; font-size: inherit; }
+.trade-ledger th, .trade-ledger td { padding: 4px 2px; white-space: normal; overflow-wrap: anywhere; word-break: normal; line-height: 1.35; }
+.trade-ledger .trade-col-material { width: 27%; }
+.trade-ledger .trade-col-unit { width: 15%; }
+.trade-ledger .trade-col-groups { width: 22%; }
+.trade-ledger .trade-col-total { width: 20%; }
+.trade-ledger .trade-col-market { width: 16%; }
+.trade-ledger .item-label { gap: 3px; }
+.trade-ledger .item-icon { width: 18px; height: 18px; flex-basis: 18px; }
+.trade-context-target { display: inline-flex; align-items: center; min-height: 24px; border-radius: 2px; cursor: context-menu; }
+.trade-context-target:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.trade-context-menu { position: fixed; z-index: 120; display: grid; min-width: 142px; padding: 4px; border: 1px solid var(--line-strong); background: #fff; box-shadow: 0 8px 26px #00000020; }
+.trade-context-menu[hidden] { display: none; }
+.trade-context-menu button { padding: 7px 9px; border: 0; background: transparent; color: var(--ink); font: 13px "Microsoft YaHei", sans-serif; text-align: left; cursor: pointer; }
+.trade-context-menu button:hover, .trade-context-menu button:focus-visible { background: var(--surface-soft); outline: none; }
+.trade-context-menu button.danger { color: var(--negative); }
+.trade-empty { margin-top: 16px; }
+.trade-market-reference { border: 0; padding: 0; background: transparent; color: var(--positive); cursor: help; font: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+.trade-market-popover { position: fixed; z-index: 100; max-height: min(420px, calc(100vh - 24px)); padding: 11px 12px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); box-shadow: 0 9px 28px #0000001c; overflow: auto; text-align: left; white-space: normal; }
+.trade-market-popover[hidden] { display: none; }
+.trade-market-popover b, .trade-market-popover em { position: relative; display: block; }
+.trade-market-popover b { margin-bottom: 2px; font-size: 13px; }
+.trade-market-popover em { margin-bottom: 8px; color: var(--muted); font-size: 11px; font-style: normal; }
+.trade-market-popover p { position: relative; margin: 0; color: var(--muted); font-size: 12px; }
+.trade-market-listings { position: relative; display: grid; gap: 4px; }
+.trade-market-listings div { display: flex; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; }
+.trade-market-listings small { color: var(--muted); white-space: nowrap; }
+.trade-search-results { display: grid; gap: 5px; margin: 8px 0 12px; }
+.trade-search-result { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 7px 9px; border: 1px solid var(--line); background: #fff; color: var(--ink); font: 13px "Microsoft YaHei", sans-serif; cursor: pointer; text-align: left; }
+.trade-search-result:hover { border-color: #aab0b3; background: var(--surface-soft); }
+.trade-search-result small, .trade-selected-item span { color: var(--muted); }
+.trade-selected-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 39px; margin: 8px 0 12px; padding: 8px 10px; border: 1px solid var(--line); background: var(--surface-soft); color: var(--muted); }
+.trade-total-preview { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin-top: 14px; padding: 11px 12px; border: 1px solid var(--line-strong); background: #fff; }
+.trade-total-preview span, .trade-total-preview small { color: var(--muted); }
+.trade-total-preview b { text-align: right; color: var(--positive); font-size: 17px; }
+.trade-total-preview small { grid-column: 1 / -1; font-size: 11px; }
+.trade-input-reference { margin-top: -5px; color: var(--muted); font-size: 12px; }
+.trade-unavailable { max-width: 700px; margin-top: 22px; padding: 22px; border: 1px solid var(--line-strong); background: #fff; }
+.trade-unavailable h1 { margin: 6px 0 12px; font-size: 20px; }
+.trade-unavailable p { color: var(--muted); line-height: 1.8; }
 .equipment-grade-picker { display: grid; gap: 4px; min-width: 118px; color: var(--muted); font-size: 12px; }
 .equipment-grade-picker select { min-height: 34px; padding: 5px 28px 5px 9px; border: 1px solid var(--ink); border-radius: 2px; background: #fff; color: var(--ink); font: 700 15px "Microsoft YaHei", sans-serif; }
 
@@ -83,6 +129,8 @@ main { max-width: none; width: 100%; margin: 0; padding: 22px 28px 36px; }
 .table-wrap--sticky .ledger thead th { position: sticky; top: 0; z-index: 2; }
 .ledger th, .ledger td { padding: 8px 9px; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; }
 .ledger th:last-child, .ledger td:last-child { border-right: 0; }
+.npc-material-table { min-width: 760px; table-layout: auto; }
+.npc-material-table th:nth-child(3), .npc-material-table td:nth-child(3) { width: 118px; max-width: 118px; padding-left: 6px; padding-right: 6px; }
 .ledger tbody tr:hover td { background: #fcfcfc; }
 .ledger td.label { color: var(--ink); }
 .ledger tr.group-row td { background: #fff; color: var(--ink); border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
@@ -94,6 +142,13 @@ main { max-width: none; width: 100%; margin: 0; padding: 22px 28px 36px; }
 .bundle-link:hover { color: inherit; text-decoration: underline; }
 .item-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; vertical-align: middle; }
 .item-icon { display: block; width: 24px; height: 24px; flex: 0 0 24px; object-fit: contain; image-rendering: auto; }
+@font-face {
+  font-family: 'FFXIV Lodestone Icons';
+  src: url('assets/FFXIV_Lodestone_SSF.ttf') format('truetype');
+  font-display: block;
+}
+.hq-icon { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: 0 0 16px; margin-left: -5px; overflow: visible; color: #231815; font-family: 'FFXIV Lodestone Icons'; font-size: 16px; line-height: 1; font-style: normal; font-weight: normal; }
+.levequest-item-icon { image-rendering: auto; }
 /* 水晶图标保留原有 32px 尺寸与完整画面；去掉旧样式的投影，避免透明边缘产生悬浮小点。 */
 .crystal-image { width: 32px; height: 32px; overflow: visible; }
 .crystal-game-icon { width: 32px; height: 32px; filter: none; }
@@ -117,6 +172,24 @@ main { max-width: none; width: 100%; margin: 0; padding: 22px 28px 36px; }
 .material-category summary { padding: 11px 13px; color: var(--ink); }
 .material-category summary span { color: var(--muted); }
 .material-category .table-wrap { margin: 0; border: 0; border-top: 1px solid var(--line); }
+.guide-material-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; padding: 9px; background: #f8faf9; }
+.guide-material-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 8px; min-width: 0; padding: 8px 9px; border: 1px solid var(--line); background: #fff; }
+.guide-material-card-title { display: flex; align-items: center; min-width: 0; }
+.guide-material-card-title .bundle-link { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.guide-material-card-title .item-label { min-width: 0; }
+.guide-material-prices { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.guide-material-prices div { min-width: 0; }
+.guide-material-prices dt { margin: 0 0 2px; color: var(--muted); font-size: 10px; }
+.guide-material-prices dd { margin: 0; color: var(--ink); font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+.guide-material-purchase { align-self: start; padding: 4px 6px; font-size: 11px; white-space: nowrap; }
+
+@media (min-width: 1280px) {
+  .guide-material-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1600px) {
+  .guide-material-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
 .craft-scrip-subcategories { padding: 0 12px 12px; }
 .craft-scrip-subcategory { margin-top: 10px; border: 1px solid var(--line); background: #fff; }
 .craft-scrip-subcategory summary { padding: 9px 10px; cursor: pointer; font-weight: 700; }
@@ -135,6 +208,12 @@ main { max-width: none; width: 100%; margin: 0; padding: 22px 28px 36px; }
 .craft-scrip-recommendation dt { color: var(--muted); font-size: 12px; }
 .craft-scrip-recommendation dd { margin: 0; color: var(--ink); font-weight: 700; font-size: 12px; }
 .craft-scrip-exchanges { margin-top: 0; }
+.craft-scrip-exchange-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.craft-scrip-equipment-group { border-top: 1px solid var(--line); }
+.craft-scrip-group-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 13px; background: #fbfbfb; }
+.craft-scrip-group-label b { color: var(--ink); font-size: 13px; }
+.craft-scrip-group-label span { color: var(--muted); font-size: 12px; }
+.craft-scrip-exchanges > .craft-scrip-subcategory { margin: 12px; }
 .craft-scrip-catalog { margin: 0 0 12px; }
 .craft-scrip-catalog .table-wrap { border-top: 1px solid var(--line); }
 .craft-scrip-job-row th { padding: 8px 12px; background: #fbfbfb; color: var(--ink); font-size: 13px; text-align: left; }
@@ -268,9 +347,12 @@ dialog::backdrop, #bundle-detail-dialog::backdrop { background: #00000024; }
   .home-metric:nth-child(n+3) { border-top: 1px solid var(--line); }
   .card:nth-child(2) { border-right: 0; }
   .card:nth-child(n+3) { border-top: 1px solid var(--line); }
-  .crystal-grid, .equipment-summaries { grid-template-columns: 1fr; }
+  .crystal-grid, .equipment-summaries, .trade-category-sections { grid-template-columns: 1fr; }
+  .guide-material-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .craft-scrip-recommendations { grid-template-columns: 1fr; }
+  .craft-scrip-exchange-grid { grid-template-columns: 1fr; }
   .craft-scrip-exchange-heading { align-items: flex-start; }
+  .craft-scrip-group-label { align-items: flex-start; flex-direction: column; gap: 3px; }
   .update-panels { grid-template-columns: 1fr; }
   .submarine-total-profit { align-items: flex-start; flex-direction: column; }
   .submarine-profit-columns { grid-template-columns: 1fr; }
@@ -284,6 +366,7 @@ dialog::backdrop, #bundle-detail-dialog::backdrop { background: #00000024; }
   .context-nav button { white-space: nowrap; }
   .header { align-items: flex-start; flex-direction: column; }
   .equipment-page-actions { justify-content: flex-start; }
+  .trade-actions { width: 100%; }
   .cards { grid-template-columns: 1fr; }
   .home-metrics { grid-template-columns: 1fr; }
   .home-metric { border-top: 1px solid var(--line); border-right: 0; }
@@ -292,4 +375,15 @@ dialog::backdrop, #bundle-detail-dialog::backdrop { background: #00000024; }
   .dashboard-chart-head > .meta { text-align: left; }
   .card { border-right: 0; border-top: 1px solid var(--line); }
   .card:first-child { border-top: 0; }
+  .guide-material-grid { grid-template-columns: minmax(0, 1fr); padding: 9px; }
 }
+
+.leve-controls { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin-top:20px; padding:14px 16px; background:#fff; border:1px solid var(--line); border-radius:10px; }
+.leve-controls label { display:grid; gap:5px; color:var(--muted); font-size:12px; }
+.leve-controls select,.leve-controls input[type="number"] { min-width:130px; padding:8px; border:1px solid var(--line-strong); border-radius:6px; background:#fff; font:inherit; color:var(--ink); }
+.leve-controls .leve-double { display:flex; align-items:center; gap:7px; padding:8px 0; color:var(--ink); font-size:14px; }
+.leve-controls .leve-double input { width:auto; margin:0; }
+.leve-summary .card b { font-variant-numeric:tabular-nums; }
+.leve-ledger td { vertical-align:middle; }
+.leve-ledger small { color:var(--muted); white-space:normal; }
+@media (max-width: 700px) { .leve-controls { display:grid; grid-template-columns:1fr 1fr; } .leve-controls select,.leve-controls input[type="number"] { min-width:0; width:100%; } }

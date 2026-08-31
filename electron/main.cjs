@@ -13,7 +13,7 @@ const DATA_MANIFEST_URLS = [
   'https://logfate.com/data/manifest.json',
   'https://ff14-fantasy-ledge.pages.dev/data/manifest.json'
 ];
-const DATASET_KEYS = ['nbbPreset', 'baseMaterials', 'submarineData', 'hqHelperFallback', 'retainerData', 'materialSources', 'exchangeSources'];
+const DATASET_KEYS = ['nbbPreset', 'baseMaterials', 'submarineData', 'hqHelperFallback', 'retainerData', 'materialSources', 'exchangeSources', 'levequests'];
 const BACKUP_KEYS = new Set([
   'ff14-770',
   'ff14-material-state',
@@ -27,6 +27,9 @@ const BACKUP_KEYS = new Set([
   'ff14-submarine-operations',
   'ff14-submarine-npc-materials',
   'ff14-submarine-suites',
+  'ff14-trade-inventory',
+  'ff14-trade-source-cache',
+  'ff14-garland-venture-core-cache',
   'ff14-market-refreshed-at'
 ]);
 

@@ -1,7 +1,7 @@
 {
   "name": "logfate",
   "productName": "LogFate",
-  "version": "1.1.4",
+  "version": "1.1.9",
   "packageManager": "pnpm@11.19.0",
   "description": "FF14 装备与潜水艇成本、库存及销售利润账本",
   "author": "392590748wanf-source",
@@ -12,6 +12,10 @@
     "check": "node --check fantasy.js && node --check electron/main.cjs && node --check electron/preload.cjs && pnpm data:check",
     "data:build": "node tools/build-data-bundle.mjs",
     "data:check": "node tools/build-data-bundle.mjs --check",
+    "leves:verify": "node tools/sync-levequest-verification.mjs",
+    "leves:recipes": "node tools/sync-levequest-recipes.mjs",
+    "leves:sources": "node tools/sync-levequest-material-sources.mjs",
+    "leves:icons": "node tools/sync-levequest-icons.mjs",
     "icons:sync": "node tools/sync-garland-icons.mjs",
     "dist:win": "electron-builder --win nsis --x64 --publish never",
     "release": "pnpm run dist:win"

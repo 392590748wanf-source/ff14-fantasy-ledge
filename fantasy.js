@@ -14,12 +14,15 @@ window.addEventListener('load', async () => {
     retainerData: 'FF14_RETAINER_DATA',
     materialSources: 'FF14_MATERIAL_SOURCES',
     exchangeSources: 'FF14_EXCHANGE_SOURCES',
-    craftScrips: 'FF14_CRAFT_SCRIPS'
+    craftScrips: 'FF14_CRAFT_SCRIPS',
+    levequests: 'FF14_LEVEQUESTS',
+    levequestRecipes: 'FF14_LEVEQUEST_RECIPES',
+    levequestMaterialSources: 'FF14_LEVEQUEST_MATERIAL_SOURCES'
   };
   Object.entries(datasetGlobals).forEach(([key, globalName]) => {
     if (externalDatasets[key] && typeof externalDatasets[key] === 'object') window[globalName] = externalDatasets[key];
   });
-  const state = { page: 'home', type: null, expanded: false, submarineExpanded: false, submarineView: 'summary', submarinePartsOpen: false, guideView: 'crystals', guideExpanded: false, selectedMaterial: null, basicCategory: 'equipment', craftScripTicket: 'orange', craftScripManualEditingId: null, otherSearch: '', basicMaterialSearch: '', equipmentGroups: {}, equipmentSections: {}, guideCategories: {}, marketRefreshing: false, marketMessage: '', equipmentCombatTier: '770', equipmentGatheringTier: '750', equipmentSummaryTiers: { combat: '770', gathering: '750' }, submarineGroups: {}, itemIndexLoading: false, itemIconIndexLoading: false, garlandIconLoading: new Set() };
+  const state = { page: 'home', type: null, expanded: false, submarineExpanded: false, submarineView: 'summary', submarinePartsOpen: false, guideView: 'basic', guideExpanded: false, selectedMaterial: null, basicCategory: 'equipment', craftScripTicket: 'orange', craftScripManualEditingId: null, otherSearch: '', basicMaterialSearch: '', tradeView: 'inventory', tradeSearch: '', tradeEditingId: null, tradeSourceLoading: new Set(), tradeSourceFailures: new Map(), tradeSourceAudited: new Set(), leveJob: '刻木匠', leveStart: 1, leveTarget: 30, leveDouble: false, leveGuideJob: '', leveGuideStart: '', leveGuideTarget: '', equipmentGroups: {}, equipmentSections: {}, guideCategories: {}, marketRefreshing: false, marketMessage: '', equipmentCombatTier: '770', equipmentGatheringTier: '750', equipmentSummaryTiers: { combat: '770', gathering: '750' }, submarineGroups: {}, itemIndexLoading: false, itemIconIndexLoading: false, garlandIconLoading: new Set() };
   const data = JSON.parse(localStorage.getItem('ff14-770') || '{"m":[],"r":[],"p":{},"l":[]}');
   const mergeMaterials = (defaults, saved) => {
     const savedById = new Map((saved || []).map(item => [String(item.id), item]));
@@ -32,6 +35,39 @@ window.addEventListener('load', async () => {
       ...(saved || []).filter(item => !defaultIds.has(String(item.id)))
     ];
   };
+  // 旧版本曾以内部 id 合并材料，而理符递归材料会因资料更新生成不同的内部 id。
+  // 游戏物品 uid 才是唯一键：启动时统一合并，避免同一物品在材料指导价出现两行。
+  const deduplicateMaterialsByUid = materials => {
+    const groups = new Map();
+    (materials || []).forEach(material => {
+      const uid = String(material?.uid || '').trim();
+      const key = uid || `__id:${String(material?.id || '')}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(material);
+    });
+    const aliases = new Map(), unique = [];
+    const snapshotTime = material => {
+      const value = Date.parse(String(material?.u || ''));
+      return Number.isFinite(value) ? value : 0;
+    };
+    groups.forEach(group => {
+      const primary = { ...group[0] };
+      const newest = group.reduce((latest, material) => snapshotTime(material) >= snapshotTime(latest) ? material : latest, group[0]);
+      group.slice(1).forEach(material => {
+        aliases.set(String(material.id), String(primary.id));
+        Object.entries(material).forEach(([key, value]) => {
+          if (key === 'id' || key === 'uid') return;
+          if ((primary[key] === undefined || primary[key] === null || primary[key] === '') && value !== undefined && value !== null && value !== '') primary[key] = value;
+        });
+      });
+      // 市场快照是一组字段，必须整体从最新记录继承，不能混用两次刷新的数据。
+      ['mp', 'u', 'marketStatus', 'marketSampleQuantity', 'marketSampleTarget', 'marketListings', 'marketDataCenters', 'marketNpcSnapshots'].forEach(key => {
+        if (newest[key] !== undefined) primary[key] = newest[key];
+      });
+      unique.push(primary);
+    });
+    return { materials: unique, aliases };
+  };
   const externalPreset = externalDatasets.nbbPreset;
   if (externalPreset?.r && externalPreset?.m) {
     const remoteRecipeIds = new Set(externalPreset.r.map(row => String(row.id)));
@@ -41,10 +77,35 @@ window.addEventListener('load', async () => {
   const savedMaterials = JSON.parse(localStorage.getItem('ff14-material-state') || 'null');
   if (savedMaterials) data.m = externalPreset?.m ? mergeMaterials(data.m, savedMaterials) : savedMaterials;
   const purchases = JSON.parse(localStorage.getItem('ff14-material-purchases') || '[]');
+  const materialDeduplication = deduplicateMaterialsByUid(data.m);
+  data.m = materialDeduplication.materials;
+  // 采购账本仍以旧内部 id 关联；迁移到保留条目后，历史采购均价不会丢失。
+  purchases.forEach(row => {
+    const replacement = materialDeduplication.aliases.get(String(row?.materialId));
+    if (replacement) row.materialId = replacement;
+  });
+  if (materialDeduplication.aliases.size) {
+    // 立即落盘迁移结果；用户下次启动也不会重新载入旧的重复记录。
+    localStorage.setItem('ff14-770', JSON.stringify(data));
+    localStorage.setItem('ff14-material-state', JSON.stringify(data.m));
+    localStorage.setItem('ff14-material-purchases', JSON.stringify(purchases));
+  }
   const prices = JSON.parse(localStorage.getItem('ff14-fantasy-prices') || '{}');
   const submarineTicketSettings = JSON.parse(localStorage.getItem('ff14-submarine-ticket-settings') || '{"defaultUnitCost":80}');
   if (!(Number(submarineTicketSettings.defaultUnitCost) > 0)) submarineTicketSettings.defaultUnitCost = 80;
   const otherMaterialIds = JSON.parse(localStorage.getItem('ff14-other-material-ids') || '[]');
+  const tradeInventoryStorageKey = 'ff14-trade-inventory';
+  let tradeInventory = JSON.parse(localStorage.getItem(tradeInventoryStorageKey) || '[]');
+  if (!Array.isArray(tradeInventory)) tradeInventory = [];
+  const tradeSourceCacheStorageKey = 'ff14-trade-source-cache';
+  let tradeSourceCache = JSON.parse(localStorage.getItem(tradeSourceCacheStorageKey) || '{}');
+  if (!tradeSourceCache || Array.isArray(tradeSourceCache) || typeof tradeSourceCache !== 'object') tradeSourceCache = {};
+  const garlandVentureCoreCacheStorageKey = 'ff14-garland-venture-core-cache';
+  const garlandVentureCoreCacheVersion = 1;
+  const garlandVentureCoreCacheTtl = 24 * 60 * 60 * 1000;
+  let garlandVentureCoreCache = JSON.parse(localStorage.getItem(garlandVentureCoreCacheStorageKey) || 'null');
+  if (!garlandVentureCoreCache || typeof garlandVentureCoreCache !== 'object' || Array.isArray(garlandVentureCoreCache)) garlandVentureCoreCache = null;
+  let garlandVentureCoreRequest = null;
   const craftScripManualStorageKey = 'ff14-craft-scrip-manual-exchanges';
   let craftScripManualExchanges = JSON.parse(localStorage.getItem(craftScripManualStorageKey) || '[]');
   if (!Array.isArray(craftScripManualExchanges)) craftScripManualExchanges = [];
@@ -73,17 +134,41 @@ window.addEventListener('load', async () => {
   // 潜水艇推荐分类和后续制作成本必须使用同一份实时来源比价结果。
   const submarineSourceCache = new Map();
   const submarineCraftCostCache = new Map();
-  const invalidatePlans = () => { planCache.clear(); submarineSourceCache.clear(); submarineCraftCostCache.clear(); };
-  const guideIndexCache = { equipment: new Map(), submarine: null, catalog: null, membership: new Map() };
-  const invalidateGuideIndexes = () => { guideIndexCache.equipment.clear(); guideIndexCache.submarine = null; guideIndexCache.catalog = null; guideIndexCache.membership.clear(); };
+  // 理符分类会在每个折叠栏统计一次；缓存顶层来源选择，避免重复递归计算同一物品。
+  const leveGuideChoiceCache = new Map();
+  const leveGuideKindCache = new Map();
+  const invalidatePlans = () => {
+    planCache.clear();
+    submarineSourceCache.clear();
+    submarineCraftCostCache.clear();
+    leveGuideChoiceCache.clear();
+    leveGuideKindCache.clear();
+  };
+  const guideIndexCache = { equipment: new Map(), submarine: null, leve: new Map(), catalog: null, membership: new Map() };
+  const invalidateGuideIndexes = () => { guideIndexCache.equipment.clear(); guideIndexCache.submarine = null; guideIndexCache.leve.clear(); guideIndexCache.catalog = null; guideIndexCache.membership.clear(); };
   const itemIndex = () => window.FF14_ITEM_INDEX || [];
   const loadItemIndex = () => {
     if (window.FF14_ITEM_INDEX || state.itemIndexLoading) return;
     state.itemIndexLoading = true;
     const script = document.createElement('script');
     script.src = 'item-index.js';
-    script.onload = () => { state.itemIndexLoading = false; if (state.page === 'guide' && state.basicCategory === 'other') renderGuide(); };
-    script.onerror = () => { state.itemIndexLoading = false; state.marketMessage = '道具索引加载失败，请稍后重试。'; renderGuide(); };
+    script.onload = () => {
+      state.itemIndexLoading = false;
+      if (state.page === 'guide' && state.basicCategory === 'other') renderGuide();
+      else if (state.page === 'trade') {
+        renderTrade();
+        const search = document.querySelector('#trade-listing-dialog[open] #trade-listing-search');
+        search?.dispatchEvent(new Event('input'));
+      }
+      else if (state.page === 'leve') renderLeve();
+    };
+    script.onerror = () => {
+      state.itemIndexLoading = false;
+      state.marketMessage = '道具索引加载失败，请稍后重试。';
+      if (state.page === 'trade') renderTrade();
+      else if (state.page === 'leve') renderLeve();
+      else renderGuide();
+    };
     document.head.append(script);
   };
   // 完整 Garland 图标索引只在“其他材料”搜索时按需载入；常用配方物品直接使用内置资料索引。
@@ -92,28 +177,105 @@ window.addEventListener('load', async () => {
     state.itemIconIndexLoading = true;
     const script = document.createElement('script');
     script.src = 'item-icon-index.js';
-    script.onload = () => { state.itemIconIndexLoading = false; if (state.page === 'guide' && state.basicCategory === 'other') renderGuide(); };
+    script.onload = () => { state.itemIconIndexLoading = false; if (state.page === 'guide' && (state.basicCategory === 'other' || state.basicCategory === 'leve')) renderGuide(); else if (state.page === 'trade') renderTrade(); else if (state.page === 'leve') renderLeve(); };
     script.onerror = () => { state.itemIconIndexLoading = false; /* 图标仅作展示，索引加载失败不影响搜索或账本。 */ };
     document.head.append(script);
   };
   const moneyFormatter = new Intl.NumberFormat('zh-CN');
   const chinaDateFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' });
   const money = n => moneyFormatter.format(Math.round(n || 0)) + ' G';
+  // 成本比较统一口径：市场参考价按交易税估算；每件自制成品加入固定时间成本。
+  // 历史采购记录的 total 已是用户实际入账合价，因此不会在这里重复计税。
+  const MARKET_COMPARISON_TAX_RATE = 0.05;
+  const SELF_CRAFT_TIME_SURCHARGE = 400;
+  const MARKET_NPC_STOCK_THRESHOLD = 200;
+  const CHINA_MARKET_DATA_CENTERS = ['陆行鸟', '莫古力', '猫小胖', '豆豆柴'];
+  const marketComparisonCost = price => {
+    const value = Number(price || 0);
+    return value > 0 ? value * (1 + MARKET_COMPARISON_TAX_RATE) : 0;
+  };
+  const craftedUnitComparisonCost = inputUnitCost => {
+    const value = Number(inputUnitCost || 0);
+    return value > 0 ? value + SELF_CRAFT_TIME_SURCHARGE : null;
+  };
   const marketPriceLabel = material => {
     if (material?.marketExcluded) {
       return material.marketExcludedReason === 'collectable' ? '不可交易，不查询市场价' : '不查询市场价';
     }
     if (Number(material?.mp) > 0) {
       if (material.marketStatus === 'listing-weighted') {
-        return money(material.mp);
+        return money(marketComparisonCost(material.mp));
       }
-      if (material.marketStatus === 'no-listings') return money(material.mp) + '（暂无在售，最近快照）';
-      if (material.marketStatus === 'stale') return money(material.mp) + '（最近快照）';
-      return money(material.mp);
+      if (material.marketStatus === 'no-listings') return money(marketComparisonCost(material.mp)) + '（暂无在售，最近快照）';
+      if (material.marketStatus === 'stale') return money(marketComparisonCost(material.mp)) + '（最近快照）';
+      return money(marketComparisonCost(material.mp));
     }
     if (material?.marketStatus === 'no-listings') return '暂无在售挂单';
     if (material?.marketStatus === 'not-found') return '无市场数据';
     return '未获取';
+  };
+  const marketNpcSnapshotKey = price => String(Number(price || 0));
+  // NPC 与市场比较时，不能因少量低价挂单误导采购建议；每个大区独立达到库存门槛后才允许市场参与比价。
+  const marketPurchaseCandidate = (material, npc = npcCandidate(material)) => {
+    const rawMarketPrice = Number(material?.mp || 0);
+    const npcPrice = Number(npc?.price || 0);
+    if (!(rawMarketPrice > 0)) {
+      return { key: 'direct-market', price: 0, unavailable: true, source: 'Universalis 市场挂单', formula: '等待四大区 HQ／NQ 市场挂单' };
+    }
+    if (!(npcPrice > 0)) {
+      return { key: 'direct-market', price: marketComparisonCost(rawMarketPrice), source: 'Universalis 中国区 HQ／NQ 挂单', formula: '中国区 HQ／NQ 挂单最低价起前 999 个的加权价 × 1.05（含税比较）' };
+    }
+    const snapshot = material?.marketNpcSnapshots?.[marketNpcSnapshotKey(npcPrice)];
+    if (snapshot?.status === 'not-required') {
+      return {
+        key: 'direct-market', price: marketComparisonCost(rawMarketPrice), source: 'Universalis 中国区 HQ／NQ 挂单',
+        formula: snapshot.reason || `中国区税后市场均价 ${money(rawMarketPrice)} × 1.05 已不低于其他有效来源，无需库存判定`
+      };
+    }
+    const candidates = Object.entries(snapshot?.dataCenters || {})
+      .filter(([, entry]) => Number(entry?.eligibleQuantity || 0) >= MARKET_NPC_STOCK_THRESHOLD && Number(entry?.comparisonPrice || 0) < npcPrice)
+      .map(([dataCenter, entry]) => ({ dataCenter, ...entry }))
+      .sort((left, right) => Number(left.comparisonPrice) - Number(right.comparisonPrice));
+    if (candidates.length) {
+      const selected = candidates[0];
+      return {
+        key: 'direct-market', price: Number(selected.comparisonPrice), source: `Universalis ${selected.dataCenter}大区 HQ／NQ 挂单`, dataCenter: selected.dataCenter,
+        eligibleQuantity: Number(selected.eligibleQuantity), rawPrice: Number(selected.rawPrice),
+        formula: `${selected.dataCenter}大区税后市场价 ${money(selected.rawPrice)} × 1.05；低于 NPC ${money(npcPrice)} 的合格库存 ${selected.eligibleQuantity} 个（任一单个大区达到 ${MARKET_NPC_STOCK_THRESHOLD} 个即可）`
+      };
+    }
+    const failed = Object.values(snapshot?.dataCenters || {}).some(entry => entry?.status === 'error');
+    return {
+      key: 'direct-market', price: 0, referencePrice: marketComparisonCost(rawMarketPrice), unavailable: true, source: 'Universalis 市场挂单',
+      formula: failed ? `部分大区刷新失败，无法确认任一单个大区是否有 ${MARKET_NPC_STOCK_THRESHOLD} 个低价库存` : `市场合格库存不足（任一单个大区需 ${MARKET_NPC_STOCK_THRESHOLD} 个税后低于 NPC ${money(npcPrice)} 的 HQ／NQ 挂单）`
+    };
+  };
+  const sourceOptionPriceLabel = option => {
+    const price = Number(option?.price || 0) || Number(option?.referencePrice || 0);
+    return price > 0 ? money(price) + (option?.unavailable && Number(option?.referencePrice || 0) > 0 ? '（仅参考）' : '') : '—';
+  };
+  const sourceChoiceRows = choice => (choice?.options || []).map(option => `<tr class="${option.key === choice.key && option.key === 'npc' ? 'npc-row' : ''}"><td>${option.key === choice.key ? recommendationTag(option, '当前推荐') : ''}${option.label}</td><td>${sourceOptionPriceLabel(option)}</td><td class="label">${option.source}</td><td class="label"><small class="meta">${option.formula || '未获取有效价格'}</small></td></tr>`).join('');
+  const sourceChoiceComparisonTable = choice => {
+    const rows = sourceChoiceRows(choice);
+    return `<section class="sales-history"><h3>取得方式单价对比</h3><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>渠道</th><th>单价</th><th>数据来源</th><th>计算依据</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="empty">暂无可用渠道</td></tr>'}</tbody></table></div></section>`;
+  };
+  // 库存门槛只用于阻止“少量低价挂单”成为推荐来源；市场价已不低于 NPC 或自制价时，它不会被选中，无需再校验库存。
+  const waiveMarketStockGateWhenNotCompetitive = options => {
+    const market = options.find(option => option.key === 'direct-market');
+    if (!market?.unavailable || !(Number(market.referencePrice) > 0)) return options;
+    const blocker = options.find(option => ['npc', 'craft'].includes(option.key) && Number(option.price) > 0 && Number(option.price) <= Number(market.referencePrice));
+    if (!blocker) return options;
+    market.price = Number(market.referencePrice);
+    market.unavailable = false;
+    market.formula = `税后市场参考价 ${money(market.referencePrice)} 不低于${blocker.label} ${money(blocker.price)}，不会被推荐，无需任一单个大区 ${MARKET_NPC_STOCK_THRESHOLD} 个库存门槛`;
+    return options;
+  };
+  const marketNpcPriceLabel = (material, npc) => {
+    const candidate = marketPurchaseCandidate(material, npc);
+    const chinaReference = marketPriceLabel(material);
+    if (!(Number(npc?.price) > 0)) return chinaReference;
+    // 表格只保留一个可直接比较的金额：有合格大区则用实际可购价，否则用中国区税后参考价。
+    return candidate.dataCenter && Number(candidate.price) > 0 ? money(candidate.price) : chinaReference;
   };
   const chinaDate = value => {
     const parts = chinaDateFormatter.formatToParts(value instanceof Date ? value : new Date(value));
@@ -130,6 +292,10 @@ window.addEventListener('load', async () => {
     localStorage.setItem('ff14-material-state', JSON.stringify(data.m));
     localStorage.setItem('ff14-material-purchases', JSON.stringify(purchases));
     localStorage.setItem('ff14-other-material-ids', JSON.stringify(otherMaterialIds));
+    localStorage.setItem(tradeInventoryStorageKey, JSON.stringify(tradeInventory));
+    localStorage.setItem(tradeSourceCacheStorageKey, JSON.stringify(tradeSourceCache));
+    if (garlandVentureCoreCache) localStorage.setItem(garlandVentureCoreCacheStorageKey, JSON.stringify(garlandVentureCoreCache));
+    else localStorage.removeItem(garlandVentureCoreCacheStorageKey);
     localStorage.setItem(craftScripManualStorageKey, JSON.stringify(craftScripManualExchanges));
     localStorage.setItem('ff14-submarine-stocks', JSON.stringify(submarineStocks));
     localStorage.setItem('ff14-submarine-sales', JSON.stringify(submarineSales));
@@ -142,7 +308,7 @@ window.addEventListener('load', async () => {
     'ff14-770', 'ff14-material-state', 'ff14-material-purchases', 'ff14-fantasy-prices',
     'ff14-submarine-ticket-settings', 'ff14-other-material-ids', 'ff14-submarine-stocks',
     'ff14-submarine-sales', 'ff14-submarine-suite-sales', 'ff14-submarine-operations',
-    'ff14-submarine-npc-materials', 'ff14-submarine-suites', craftScripManualStorageKey, 'ff14-market-refreshed-at'
+    'ff14-submarine-npc-materials', 'ff14-submarine-suites', craftScripManualStorageKey, tradeInventoryStorageKey, tradeSourceCacheStorageKey, garlandVentureCoreCacheStorageKey, 'ff14-market-refreshed-at'
   ];
   const backupFormat = 'ff14-fantasy-backup';
   const createBackup = () => ({
@@ -216,7 +382,9 @@ window.addEventListener('load', async () => {
   const itemIconId = uid => {
     const key = String(uid);
     const craftScripIcon = Number(window.FF14_CRAFT_SCRIPS?.items?.[key]?.i || window.FF14_CRAFT_SCRIP_DATA?.items?.[key]?.i || 0);
-    const direct = Number(garlandIconIndex[key] || garlandIconCache[key] || craftScripIcon || 0);
+    const leveIcon = Number((window.FF14_LEVEQUESTS?.routes || []).find(route => String(route.itemId) === key)?.itemIcon || 0);
+    const leveRecipeIcon = Number(window.FF14_LEVEQUEST_RECIPES?.items?.[key]?.icon || 0);
+    const direct = Number(garlandIconIndex[key] || garlandIconCache[key] || craftScripIcon || leveIcon || leveRecipeIcon || 0);
     const indexed = Number(window.FF14_ITEM_ICON_INDEX?.[key] || 0);
     return direct > 0 ? direct : indexed > 0 ? indexed : 0;
   };
@@ -237,12 +405,22 @@ window.addEventListener('load', async () => {
       .catch(() => {})
       .finally(() => state.garlandIconLoading.delete(key));
   };
-  // Garland Tools 的图标编号由物品资料接口提供；加载失败直接移除图片，文本和表格对齐不受影响。
-  const itemIconMarkup = uid => {
-    const iconId = itemIconId(uid);
-    return iconId ? `<img class="item-icon" src="https://www.garlandtools.org/files/icons/item/${iconId}.png" alt="" aria-hidden="true" loading="lazy" decoding="async" onerror="this.remove()">` : '';
+  const levequestNbbIconPath = uid => {
+    const id = String(uid || '');
+    return /^\d+$/.test(id) ? `assets/levequest-icons/${id}.png` : '';
   };
-  const itemLabelMarkup = (uid, name) => `<span class="item-label">${itemIconMarkup(uid)}<span>${name}</span></span>`;
+  // Garland Tools 的图标编号由物品资料接口提供；理符 HQ 交付物则使用
+  // NBB 导出的原始物品图，不再在客户端额外叠加亮点。
+  const itemIconMarkup = (uid, options = {}) => {
+    if (options.hq) {
+      const nbbIcon = levequestNbbIconPath(uid);
+      return nbbIcon ? `<img class="item-icon levequest-item-icon" src="${nbbIcon}" alt="" aria-hidden="true" loading="lazy" decoding="async" onerror="this.remove()">` : '';
+    }
+    const iconId = itemIconId(uid);
+    if (!iconId) return '';
+    return `<img class="item-icon" src="https://www.garlandtools.org/files/icons/item/${iconId}.png" alt="" aria-hidden="true" loading="lazy" decoding="async" onerror="this.remove()">`;
+  };
+  const itemLabelMarkup = (uid, name, options = {}) => `<span class="item-label">${itemIconMarkup(uid, options)}<span>${name}</span>${options.hq ? '<span class="hq-icon" role="img" title="高品质交付" aria-label="高品质交付">&#xE03C;</span>' : ''}</span>`;
   // 改级潜水艇的“骨架”只是在工房配方中承接旧部件的内部节点，
   // 不是真实的市场板物品，不能向 Universalis 查询价格。
   const submarineSkeletonNodeIds = new Set([
@@ -255,6 +433,9 @@ window.addEventListener('load', async () => {
   const materialSources = window.FF14_MATERIAL_SOURCES || {};
   const exchangeSources = window.FF14_EXCHANGE_SOURCES || { carriers: {}, routes: [] };
   const craftScrips = window.FF14_CRAFT_SCRIPS || { tickets: {}, exchanges: [], collectables: [], items: {}, recipes: {} };
+  const levequests = window.FF14_LEVEQUESTS || { jobs: [], routes: [] };
+  const levequestRecipes = window.FF14_LEVEQUEST_RECIPES || { items: {}, recipes: {}, audit: {} };
+  const levequestMaterialSources = window.FF14_LEVEQUEST_MATERIAL_SOURCES || { items: {}, audit: {} };
   const normalizeCraftScripExchange = (route, manual = false) => {
     const itemId = String(route?.itemId ?? route?.uid ?? '').trim();
     const ticket = String(route?.ticket || '');
@@ -397,11 +578,11 @@ window.addEventListener('load', async () => {
   const directSourceChoice = material => {
     if (!material) return { price: 0, source: '—' };
     const purchase = purchaseAverage(material), npc = npcCandidate(material);
-    // 已有采购均价（含兑换采购）优先；NPC 材料仍按用户要求与采购价取更低者。
-    if (purchase > 0 && !npc?.price) return { price: purchase, source: '采购平均价', type: 'purchase' };
+    const market = marketPurchaseCandidate(material, npc);
     const choices = [];
     if (purchase > 0) choices.push({ price: purchase, source: '采购平均价', type: 'purchase' });
-    if (Number(npc?.price) > 0) choices.push({ ...npcCostChoice(material, npc), type: 'npc' });
+    if (Number(npc?.price) > 0) choices.push({ price: Number(npc.price), source: npc.source || 'NPC 采购价', type: 'npc' });
+    if (market.price > 0) choices.push({ price: market.price, source: market.source + '（含 5% 税费）', type: 'market' });
     return choices.sort((left, right) => left.price - right.price)[0] || { price: 0, source: '—' };
   };
   const syncPurchaseCosts = () => {
@@ -518,25 +699,24 @@ window.addEventListener('load', async () => {
     return priority.find(kind => kinds.includes(kind)) || fallback;
   };
   // 非自制取得方式：市场、NPC 与兑换均为成本终点，不继续展开配方。
-  const submarineNonCraftSourceOptions = material => {
+  const submarineNonCraftSourceOptions = (material, npcSpec = npcCandidate(material), includeNpc = true) => {
     if (!material) return [];
-    const uid = String(material.uid), options = [], directPurchase = directPurchaseAverage(material), market = Number(material.mp || 0), nativeKind = staticSubmarineKind(material);
+    const uid = String(material.uid), options = [], directPurchase = directPurchaseAverage(material), market = marketPurchaseCandidate(material, npcSpec), nativeKind = staticSubmarineKind(material);
     if (directPurchase > 0) options.push({ key: 'direct-purchase', kind: nativeKind, label: '市场采购', source: '采购平均价', price: directPurchase, formula: '全部历史直接采购合价 ÷ 数量' });
-    else if (market > 0) options.push({ key: 'direct-market', kind: nativeKind, label: '市场采购', source: 'Universalis 市场平均价', price: market, formula: '中国区 NQ 挂单最低价起前 999 个的加权价' });
-    else options.push({ key: 'direct-missing', kind: nativeKind, label: '市场采购', source: '等待市场价 / 未录入采购价', price: 0, unavailable: true });
-    const npc = npcCandidate(uid);
-    if (Number(npc?.price || 0) > 0) options.push({ key: 'npc', kind: 'NPC 购买材料', label: 'NPC 购买', source: npc.source || 'NPC 商店', price: Number(npc.price), formula: 'NPC 售卖价' });
+    options.push({ key: 'direct-market', kind: nativeKind, label: '市场采购', source: market.source, price: Number(market.price || 0), unavailable: Boolean(market.unavailable), formula: market.formula });
+    const npc = npcSpec;
+    if (includeNpc && Number(npc?.price || 0) > 0) options.push({ key: 'npc', kind: 'NPC 购买材料', label: 'NPC 购买', source: npc.source || 'NPC 商店', price: Number(npc.price), formula: 'NPC 售卖价' });
     exchangeRoutesFor(uid).forEach(route => {
       if (route.carrierId) {
         const carrier = data.m.find(item => String(item.uid) === String(route.carrierId));
-        const carrierPurchase = carrier ? purchaseAverage(carrier) : 0, carrierMarket = Number(carrier?.mp || 0), carrierPrice = carrierPurchase || carrierMarket;
-        options.push({ key: 'exchange-' + route.routeIndex, kind: sourceKindForRoute(route), label: sourceLabelForRoute(route), source: carrier?.n || route.label, price: carrierPrice > 0 ? carrierPrice / route.quantity : 0, unavailable: !(carrierPrice > 0), formula: carrierPrice > 0 ? `${carrierPurchase > 0 ? '凭证采购均价' : '凭证市场均价'} ${money(carrierPrice)} ÷ ${route.quantity}` : '等待凭证市场价 / 采购价' });
+        const carrierPurchase = carrier ? purchaseAverage(carrier) : 0, carrierMarket = marketPurchaseCandidate(carrier, npcCandidate(carrier)).price, carrierPrice = carrierPurchase || carrierMarket;
+        options.push({ key: 'exchange-' + route.routeIndex, kind: sourceKindForRoute(route), label: sourceLabelForRoute(route), source: carrier?.n || route.label, price: carrierPrice > 0 ? carrierPrice / route.quantity : 0, unavailable: !(carrierPrice > 0), formula: carrierPrice > 0 ? `${carrierPurchase > 0 ? '凭证采购均价' : '凭证市场均价 × 1.05（含税比较）'} ${money(carrierPrice)} ÷ ${route.quantity}` : '等待凭证市场价 / 采购价' });
       } else {
         const unitCost = ticketUnitCost(), ticketCost = Number(route.ticketCost || 40) * unitCost;
         options.push({ key: 'exchange-' + route.routeIndex, kind: sourceKindForRoute(route), label: sourceLabelForRoute(route), source: route.label, price: ticketCost / route.quantity, formula: `${Number(route.ticketCost || 40)} 张 × ${money(unitCost)} ÷ ${route.quantity}` });
       }
     });
-    return options;
+    return waiveMarketStockGateWhenNotCompetitive(options);
   };
   const lowestSubmarineOption = (options, fallbackKind) => {
     const valid = options.filter(option => Number(option.price) > 0);
@@ -551,9 +731,9 @@ window.addEventListener('load', async () => {
     const options = submarineNonCraftSourceOptions(material);
     if (!trail.has(uid) && recipeCandidatesFor(uid).length) {
       const craft = selfCraftUnitCost(uid, trail);
-      options.push({ key: 'craft', kind: staticSubmarineKind(material), label: '自制（制作配方）', source: '递归制作配方', price: Number(craft || 0), unavailable: !(Number(craft) > 0), formula: craft ? '下级材料按最低有效来源递归计算' : '等待下级材料价格' });
+      options.push({ key: 'craft', kind: staticSubmarineKind(material), label: '自制配方', source: '递归制作配方', price: Number(craft || 0), unavailable: !(Number(craft) > 0), formula: craft ? '递归制作配方的当前单价' : '等待下级材料价格' });
     }
-    return lowestSubmarineOption(options, staticSubmarineKind(material));
+    return lowestSubmarineOption(waiveMarketStockGateWhenNotCompetitive(options), staticSubmarineKind(material));
   };
   const submarineCraftInputBreakdown = (uid, trail = new Set()) => {
     uid = String(uid);
@@ -570,38 +750,38 @@ window.addEventListener('load', async () => {
     }
     return rows;
   };
-  const selfCraftUnitCost = (uid, trail = new Set()) => {
+  const selfCraftUnitCost = (uid, trail = new Set(), includeTimeSurcharge = true) => {
     uid = String(uid);
     if (trail.has(uid)) return null;
-    if (!trail.size && submarineCraftCostCache.has(uid)) return submarineCraftCostCache.get(uid);
+    if (includeTimeSurcharge && !trail.size && submarineCraftCostCache.has(uid)) return submarineCraftCostCache.get(uid);
     const node = recipeCandidatesFor(uid)[0];
     if (!node) return null;
     const rows = submarineCraftInputBreakdown(uid, trail);
-    const value = rows.length && rows.every(row => row.unit > 0) ? rows.reduce((sum, row) => sum + row.total, 0) : null;
-    if (!trail.size) submarineCraftCostCache.set(uid, value);
+    const inputs = rows.length && rows.every(row => row.unit > 0) ? rows.reduce((sum, row) => sum + row.total, 0) : null;
+    const value = inputs == null ? null : (includeTimeSurcharge ? craftedUnitComparisonCost(inputs) : inputs);
+    if (includeTimeSurcharge && !trail.size) submarineCraftCostCache.set(uid, value);
     return value;
   };
-  // 装备配方继续沿用既有的纯递归口径；潜水艇才使用“下级取最低来源”的新规则。
-  const equipmentCraftUnitCost = (uid, trail = new Set()) => {
+  // 装备与潜水艇均使用同一来源比较口径；装备节点同样可在直购与自制间选取较低有效成本。
+  const equipmentCraftUnitCost = (uid, trail = new Set(), includeTimeSurcharge = true) => {
     uid = String(uid);
     if (trail.has(uid)) return null;
     const node = recipeCandidatesFor(uid)[0];
-    if (!node) {
-      const npc = npcCandidate(uid), material = data.m.find(item => String(item.uid) === uid);
-      if (npc?.price) return npcCostChoice(material || uid, npc).price || null;
-      const price = material ? (purchaseAverage(material) || material.mp || 0) : 0;
-      return price || null;
-    }
+    const material = data.m.find(item => String(item.uid) === uid) || { uid, n: materialName(uid) };
+    const direct = directSourceChoice(material);
+    if (!node) return Number(direct.price) > 0 ? Number(direct.price) : null;
     const next = new Set(trail); next.add(uid);
     let total = 0;
     for (let index = 0; index < node.a.length; index += 2) {
       const child = Number(node.a[index]), quantity = Number(node.a[index + 1]);
       if (!child || !quantity) continue;
-      const price = equipmentCraftUnitCost(child, next);
+      const price = equipmentCraftUnitCost(child, next, true);
       if (price == null) return null;
       total += price * quantity;
     }
-    return total / Math.max(1, Number(node.y) || 1);
+    const inputUnitCost = total / Math.max(1, Number(node.y) || 1);
+    const craft = includeTimeSurcharge ? craftedUnitComparisonCost(inputUnitCost) : inputUnitCost;
+    return Number(direct.price) > 0 ? Math.min(Number(direct.price), craft) : craft;
   };
   // 所有可用取得方式都在此处展开。0、缺价和无法递归的路线仅保留说明，不参与最低价选择。
   const submarineSourceOptions = material => {
@@ -609,9 +789,9 @@ window.addEventListener('load', async () => {
     const uid = String(material.uid), options = submarineNonCraftSourceOptions(material);
     if (recipeCandidatesFor(uid).length) {
       const craft = selfCraftUnitCost(uid);
-      options.push({ key: 'craft', kind: staticSubmarineKind(material), label: '自制（制作配方）', source: '递归制作配方', price: Number(craft || 0), unavailable: !(Number(craft) > 0), formula: craft ? '下级材料按最低有效来源递归计算' : '等待下级材料价格' });
+      options.push({ key: 'craft', kind: staticSubmarineKind(material), label: '自制配方', source: '递归制作配方', price: Number(craft || 0), unavailable: !(Number(craft) > 0), formula: craft ? '递归制作配方的当前单价' : '等待下级材料价格' });
     }
-    return options;
+    return waiveMarketStockGateWhenNotCompetitive(options);
   };
   const submarineSourceChoice = material => {
     const uid = String(material?.uid || '');
@@ -648,6 +828,8 @@ window.addEventListener('load', async () => {
   };
   const showSubmarineRecommendationTag = material => {
     const choice = submarineSourceChoice(material);
+    // 常规采集品只展示客观分类与价格；不把“采集”伪装成一个需要执行的推荐操作。
+    if (!isSubmarineIntermediate(material) && staticSubmarineKind(material) === '常规采集品') return false;
     // 无制作配方的原材料推荐市场采购时，价格列已足够表达取得方式，无需重复标签。
     return Boolean(isSubmarineIntermediate(material) || choice.label !== '市场采购');
   };
@@ -681,12 +863,14 @@ window.addEventListener('load', async () => {
   ensureSubmarineMaterials();
   syncPurchaseCosts();
   const refreshNpcRecommendations = () => { invalidateNpcMaterials(); ensureSubmarineMaterials(); syncPurchaseCosts(); };
-  const recipeNodeFor = (uid, parentJob = null, scope = 'equipment') => {
+  const recipeNodeFor = (uid, parentJob = null, scope = 'equipment', isFinishedProduct = false) => {
     const candidates = recipeCandidatesFor(uid);
     const node = candidates.find(row => parentJob != null && Number(row.j) === Number(parentJob)) || candidates[0] || null;
     const material = data.m.find(item => String(item.uid) === String(uid));
     const direct = scope === 'submarine' ? submarineSourceChoice(material || { uid: String(uid) }) : directSourceChoice(material || { uid: String(uid) });
-    const recipeCost = node ? (scope === 'submarine' ? selfCraftUnitCost(uid) : equipmentCraftUnitCost(uid)) : null;
+    const recipeCost = node ? (scope === 'submarine'
+      ? selfCraftUnitCost(uid, new Set(), !isFinishedProduct)
+      : equipmentCraftUnitCost(uid, new Set(), !isFinishedProduct)) : null;
     // 直购、采购或兑换成本不高于递归制作时，将该材料作为基础叶子处理。
     // 潜水艇的“自制（制作配方）”推荐不等于外购：必须继续展开合建与下级配方。
     // 只有市场、NPC、兑换等非制作渠道才可以将该物品视为成本叶子。
@@ -694,15 +878,193 @@ window.addEventListener('load', async () => {
     if (!isSelfCraftChoice && direct.price > 0 && (!node || recipeCost == null || direct.price <= recipeCost)) return null;
     return node;
   };
-  const materialName = uid => data.m.find(item => String(item.uid) === String(uid))?.n || craftScripItems[String(uid)]?.n || baseMaterials.n?.[String(uid)] || submarineData.n?.[String(uid)] || `未知材料 ${uid}`;
+  const materialName = uid => data.m.find(item => String(item.uid) === String(uid))?.n || levequestRecipes.items?.[String(uid)]?.n || hqHelperItems[String(uid)]?.n || craftScripItems[String(uid)]?.n || baseMaterials.n?.[String(uid)] || submarineData.n?.[String(uid)] || `未知材料 ${uid}`;
+  const leveRouteMatches = (route, filters = {}) => {
+    const job = String(filters.job || '');
+    const start = Number(filters.start || 0), target = Number(filters.target || 0);
+    return (!job || route.job === job) && (!start || Number(route.level) >= start) && (!target || Number(route.level) < target);
+  };
+  const leveGuideRoutes = () => (levequests.routes || []).filter(route => leveRouteMatches(route, {
+    job: state.leveGuideJob, start: state.leveGuideStart, target: state.leveGuideTarget
+  }));
+  // 理符根物品必须有已核验 ID；此处仅将资料包已有的物品元数据投影到内存，
+  // 不用中文名称反向猜测，也不把它们写入用户采购或库存台账。
+  const leveKnownMaterial = row => {
+    const uid = String(row?.itemId || '');
+    if (!/^\d+$/.test(uid)) return null;
+    const known = data.m.find(material => String(material.uid) === uid);
+    if (known) return known;
+    const source = levequestRecipes.items?.[uid] || hqHelperItems[uid] || craftScripItems[uid] || {};
+    const material = { id: `leve-${uid}`, uid, n: source.n || row.item || materialName(uid), c: 0, mp: 0, u: '', leveMaterial: true };
+    data.m.push(material);
+    return material;
+  };
+  const leveMaterial = uid => {
+    uid = String(uid || '');
+    if (!/^\d+$/.test(uid)) return null;
+    const current = data.m.find(material => String(material.uid) === uid);
+    if (current) return current;
+    const source = levequestRecipes.items?.[uid] || hqHelperItems[uid] || craftScripItems[uid] || {};
+    const material = { id: `leve-ingredient-${uid}`, uid, n: source.n || materialName(uid), c: 0, mp: 0, u: '', leveMaterial: true };
+    data.m.push(material);
+    return material;
+  };
+  const leveRecipeNode = uid => levequestRecipes.recipes?.[String(uid)]?.[0] || null;
+  const leveJobLabels = { 8: '刻木匠', 9: '锻铁匠', 10: '铸甲匠', 11: '雕金匠', 12: '制革匠', 13: '裁衣匠', 14: '炼金术士', 15: '烹饪师' };
+  const leveSourceRecord = uid => levequestMaterialSources.items?.[String(uid)] || {};
+  const leveNonCraftSourceOptions = uid => {
+    const material = leveMaterial(uid);
+    if (!material) return [];
+    const record = leveSourceRecord(uid);
+    const npc = Number(record.npc?.price || 0) > 0 ? record.npc : npcCandidate(material);
+    // 理符 Garland 商店资料独立于潜水艇来源表，不能反向改变潜水艇成本。
+    const options = submarineNonCraftSourceOptions(material, npc, false);
+    if (Number(npc?.price || 0) > 0) options.push({ key: 'npc', kind: 'NPC 购买材料', label: 'NPC 购买', source: npc.source || 'Garland NPC 商店', price: Number(npc.price), formula: 'Garland NPC 售卖价' });
+    return waiveMarketStockGateWhenNotCompetitive(options);
+  };
+  const leveNonCraftSourceChoice = uid => {
+    const material = leveMaterial(uid);
+    if (!material) return { key: 'pending', kind: '理符材料', label: '待补价', source: '未找到材料资料', price: 0, unavailable: true };
+    const choices = leveNonCraftSourceOptions(uid).filter(choice => Number(choice.price) > 0);
+    return { ...lowestSubmarineOption(choices, '理符材料'), options: choices };
+  };
+  const leveDirectUnitCost = uid => Number(leveNonCraftSourceChoice(uid).price) || null;
+  // 交付成品本身不计时间补差；理符下级半成品仍按全局自制规则比较。
+  const leveRecipeUnitCost = (uid, trail = new Set(), allowDirect = true, includeTimeSurcharge = true) => {
+    uid = String(uid || '');
+    if (trail.has(uid)) return null;
+    const recipe = leveRecipeNode(uid);
+    const direct = leveDirectUnitCost(uid);
+    if (!recipe) return direct;
+    const next = new Set(trail); next.add(uid);
+    let craft = 0;
+    for (let index = 0; index < recipe.a.length; index += 2) {
+      const child = String(recipe.a[index] || ''), quantity = Number(recipe.a[index + 1] || 0);
+      const childCost = leveRecipeUnitCost(child, next, true);
+      if (!(quantity > 0) || !(Number(childCost) > 0)) { craft = null; break; }
+      craft += childCost * quantity / Math.max(1, Number(recipe.y) || 1);
+    }
+    const craftWithTime = Number(craft) > 0
+      ? (includeTimeSurcharge ? craftedUnitComparisonCost(craft) : craft)
+      : null;
+    if (!(Number(craftWithTime) > 0)) return allowDirect ? direct : null;
+    return allowDirect && Number(direct) > 0 ? Math.min(direct, craftWithTime) : craftWithTime;
+  };
+  const leveCraftInputChoice = (uid, trail = new Set()) => {
+    uid = String(uid || '');
+    const material = leveMaterial(uid);
+    const choices = material ? leveNonCraftSourceOptions(uid) : submarineNonCraftSourceOptions({ uid, n: materialName(uid) });
+    if (!trail.has(uid) && leveRecipeNode(uid)) {
+      const craft = leveRecipeUnitCost(uid, trail, false);
+      choices.push({ key: 'craft', kind: '理符材料', label: '自制配方', source: '递归制作配方', price: Number(craft || 0), unavailable: !(Number(craft) > 0), formula: craft ? '递归制作配方的当前单价' : '等待下级材料价格' });
+    }
+    waiveMarketStockGateWhenNotCompetitive(choices);
+    return { ...lowestSubmarineOption(choices, '理符材料'), options: choices };
+  };
+  // 仅缓存无递归轨迹的顶层选择。带 trail 的调用必须保留独立上下文以正确防环。
+  const leveGuideChoice = uid => {
+    uid = String(uid || '');
+    if (leveGuideChoiceCache.has(uid)) return leveGuideChoiceCache.get(uid);
+    const choice = leveCraftInputChoice(uid);
+    leveGuideChoiceCache.set(uid, choice);
+    return choice;
+  };
+  const leveCraftInputBreakdown = (uid, trail = new Set()) => {
+    const recipe = leveRecipeNode(uid);
+    if (!recipe) return [];
+    uid = String(uid || '');
+    if (trail.has(uid)) return [];
+    const next = new Set(trail); next.add(uid);
+    const output = Math.max(1, Number(recipe.y) || 1);
+    return Array.from({ length: recipe.a.length / 2 }, (_, index) => {
+      const child = String(recipe.a[index * 2]), batchQuantity = Number(recipe.a[index * 2 + 1] || 0);
+      const choice = leveCraftInputChoice(child, next), unit = Number(choice.price || 0), material = leveMaterial(child);
+      return { uid: Number(child), name: material?.n || materialName(child), quantity: batchQuantity / output, batchQuantity, choice, unit, total: unit * batchQuantity / output, batchTotal: unit * batchQuantity };
+    }).filter(row => row.uid && row.batchQuantity > 0);
+  };
+  const leveRecipeInputBreakdown = uid => leveCraftInputBreakdown(uid);
+  const leveRecipeCost = row => {
+    const uid = String(row?.itemId || '');
+    const recipe = /^\d+$/.test(uid) ? leveRecipeNode(uid) : null;
+    if (!recipe) return { unit: null, reason: row?.itemId ? '缺少制作配方' : '待核验物品 ID' };
+    const rows = leveRecipeInputBreakdown(uid);
+    if (!rows.length || rows.some(entry => !(Number(entry.unit) > 0))) return { unit: null, reason: '等待下级材料价格' };
+    return { unit: leveRecipeUnitCost(uid, new Set(), false, false), reason: '' };
+  };
+  const leveGuideKindPriority = ['NPC 购买材料', '军票兑换', '薰衣草/风茄兑换', '天穹票兑换', '市场采购半成品', '常规采集品', '限时采集品', '怪物掉落'];
+  const leveSourceKinds = material => (leveSourceRecord(material?.uid).kinds || []).filter(Boolean);
+  // 资料只注明“市场采购半成品”的配方物品，本身不是采集叶子。
+  // 若当前选择自制，就让递归展开出的真实下级材料承担材料指导价展示。
+  const isLeveSelfCraftIntermediate = material => {
+    const uid = String(material?.uid || ''), kinds = leveSourceKinds(material);
+    return Boolean(uid && leveRecipeNode(uid) && kinds.length && kinds.every(kind => kind === '市场采购半成品') && leveGuideChoice(uid).key === 'craft');
+  };
+  const leveGuideKind = material => {
+    const uid = String(material?.uid || '');
+    if (leveGuideKindCache.has(uid)) return leveGuideKindCache.get(uid);
+    const record = leveSourceRecord(uid), choice = leveGuideChoice(uid);
+    let kind;
+    if (choice.key === 'npc') kind = 'NPC 购买材料';
+    else if (isExchangeChoice(choice)) kind = choice.kind;
+    else if (leveRecipeNode(uid) && ['direct-purchase', 'direct-market'].includes(choice.key)) kind = '市场采购半成品';
+    else {
+      const eligibleKinds = (record.kinds || []).filter(item => item !== '市场采购半成品');
+      if (leveGuideKindPriority.some(item => eligibleKinds.includes(item))) kind = leveGuideKindPriority.find(item => eligibleKinds.includes(item));
+      // 有配方却没有可显示的真实来源，不能误称为采集品；交给资料审计补齐来源。
+      else kind = leveRecipeNode(uid) || record.status === '待核验' ? '待核验' : '常规采集品';
+    }
+    leveGuideKindCache.set(uid, kind);
+    return kind;
+  };
+  const isLeveGuideExcluded = material => {
+    const uid = String(material?.uid || ''), record = leveSourceRecord(uid);
+    return isCrystal(material) || record.kinds?.includes('潜水艇携带材料') || sourceKinds(material, 'submarine').includes('潜水艇携带材料');
+  };
+  const leveGuideClassificationAudit = materials => {
+    const list = materials || [];
+    const hiddenSelfCraftIntermediates = list.filter(isLeveSelfCraftIntermediate).map(material => ({ uid: String(material.uid), name: material.n }));
+    const marketPurchaseIntermediates = list.filter(material => leveRecipeNode(material.uid) && leveSourceKinds(material).includes('市场采购半成品') && !isLeveSelfCraftIntermediate(material)).map(material => ({ uid: String(material.uid), name: material.n }));
+    const pendingSourceRecipes = list.filter(material => leveRecipeNode(material.uid) && leveGuideKind(material) === '待核验').map(material => ({ uid: String(material.uid), name: material.n }));
+    return { hiddenSelfCraftIntermediates, marketPurchaseIntermediates, pendingSourceRecipes };
+  };
+  const leveBaseMaterials = () => {
+    const filterKey = [state.leveGuideJob, state.leveGuideStart, state.leveGuideTarget].join('|');
+    const cached = guideIndexCache.leve.get(filterKey);
+    if (cached) {
+      const candidates = data.m.filter(material => cached.has(String(material.uid)) && !isLeveGuideExcluded(material));
+      window.FF14_LEVE_GUIDE_CLASSIFICATION_AUDIT = leveGuideClassificationAudit(candidates);
+      return candidates.filter(material => !isLeveSelfCraftIntermediate(material)).sort((left, right) => Number(left.uid) - Number(right.uid));
+    }
+    const required = new Set(), visiting = new Set();
+    const visit = uid => {
+      uid = String(uid);
+      if (!/^\d+$/.test(uid) || visiting.has(uid)) return;
+      visiting.add(uid);
+      const node = leveRecipeNode(uid);
+      if (node) for (let index = 0; index < node.a.length; index += 2) {
+        const child = String(node.a[index] || '');
+        if (!/^\d+$/.test(child)) continue;
+        if (!isLeveGuideExcluded(leveMaterial(child) || { uid: child, n: levequestRecipes.items?.[child]?.n || materialName(child) })) required.add(child);
+        const source = levequestRecipes.items?.[child] || hqHelperItems[child] || craftScripItems[child] || {};
+        if (!data.m.some(material => String(material.uid) === child)) data.m.push({ id: `leve-ingredient-${child}`, uid: child, n: source.n || materialName(child), c: 0, mp: 0, u: '', leveMaterial: true });
+        visit(child);
+      }
+      visiting.delete(uid);
+    };
+    leveGuideRoutes().forEach(route => visit(route.itemId));
+    guideIndexCache.leve.set(filterKey, required);
+    const candidates = data.m.filter(material => required.has(String(material.uid)) && !isLeveGuideExcluded(material));
+    window.FF14_LEVE_GUIDE_CLASSIFICATION_AUDIT = leveGuideClassificationAudit(candidates);
+    return candidates.filter(material => !isLeveSelfCraftIntermediate(material)).sort((left, right) => Number(left.uid) - Number(right.uid));
+  };
   const nodeKey = (uid, node) => node ? `${uid}@${node.id || node.j}` : `leaf@${uid}`;
   // 统一生产计划：同一半成品先合并需求，再按产出向上取整；每个视图都从该计划取数。
   function calculateProductionPlan(bundle) {
     const nodes = new Map(), leaves = new Map(), roots = [];
     const scope = bundle.partId ? 'submarine' : 'equipment';
     const addLeaf = (uid, quantity) => leaves.set(String(uid), (leaves.get(String(uid)) || 0) + quantity);
-    const addNeed = (uid, quantity, parentJob = null) => {
-      const node = recipeNodeFor(uid, parentJob, scope);
+    const addNeed = (uid, quantity, parentJob = null, isFinishedProduct = false) => {
+      const node = recipeNodeFor(uid, parentJob, scope, isFinishedProduct);
       if (!node) { addLeaf(uid, quantity); return `leaf@${uid}`; }
       const key = nodeKey(uid, node);
       const entry = nodes.get(key) || { key, uid: Number(uid), node, needed: 0, batches: 0, processed: 0, inputs: [] };
@@ -712,9 +1074,10 @@ window.addEventListener('load', async () => {
     };
     bundle.components.filter(component => component.item).forEach(component => {
       const itemId = component.item.itemId;
-      const key = addNeed(itemId, component.qty, baseMaterials.j?.[String(itemId)] ?? null);
+      const key = addNeed(itemId, component.qty, baseMaterials.j?.[String(itemId)] ?? null, true);
       roots.push({ key, uid: Number(itemId), quantity: component.qty, name: component.item.n });
     });
+    const rootKeys = new Set(roots.map(root => root.key));
     // 新增需求只补充因新批次产生的子素材，直到所有批次数稳定。
     let changed = true;
     while (changed) {
@@ -748,6 +1111,11 @@ window.addEventListener('load', async () => {
       }
       const share = quantity / Math.max(entry.needed, 1);
       const next = new Set(trail); next.add(key);
+      // 只给真正的半成品计时：成品根节点不收取 400 G，半成品的时间成本
+      // 跟随其制作成本分摊进引用它的单价，而不是作为独立的明细行。
+      if (!rootKeys.has(key)) {
+        target.cost += SELF_CRAFT_TIME_SURCHARGE * Number(entry.batches || 0) * Math.max(1, Number(entry.node.y) || 1) * share;
+      }
       entry.inputs.forEach(input => addAllocation(target, input.key, input.quantity * share, next));
     };
     const makeRows = (requests, nameFor) => {
@@ -771,9 +1139,15 @@ window.addEventListener('load', async () => {
     });
     const direct = makeRows(directRequests, request => request.name);
     const basic = [...leaves.entries()].map(([uid, quantity]) => ({ uid: Number(uid), name: materialName(uid), quantity, cost: leafCost(uid) * quantity })).sort((left, right) => left.uid - right.uid);
-    const total = basic.reduce((sum, row) => sum + row.cost, 0);
+    // 根成品本身不收制作时间补差。半成品的补差随其成本分摊到上级单价中，
+    // 因此详情中不会再出现一行独立的“制作时间补差”。
+    const craftedOutputs = [...nodes.entries()].filter(([key]) => !rootKeys.has(key)).reduce((sum, [, entry]) => sum + Number(entry.batches || 0) * Math.max(1, Number(entry.node.y) || 1), 0);
+    const timeCost = craftedOutputs * SELF_CRAFT_TIME_SURCHARGE;
+    // 完整成本从根成品的递归分摊取得；其中已含半成品的时间补差。
+    const basicTotal = basic.reduce((sum, row) => sum + row.cost, 0);
+    const total = finished.reduce((sum, row) => sum + row.cost, 0);
     const allocationCost = (key, quantity) => { const target = { cost: 0 }; addAllocation(target, key, quantity); return target.cost; };
-    return { roots, nodes, finished, direct, basic, total, allocationCost, missing: basic.filter(row => !leafCost(row.uid)).map(row => row.name) };
+    return { roots, nodes, finished, direct, basic, basicTotal, total, timeCost, craftedOutputs, allocationCost, missing: basic.filter(row => !leafCost(row.uid)).map(row => row.name) };
   }
   const productionPlan = bundle => {
     const key = bundle.id || JSON.stringify(bundle.components?.map(component => [component.itemId || component.item?.itemId, component.qty]));
@@ -838,6 +1212,8 @@ window.addEventListener('load', async () => {
           <button data-page="home">总览</button>
           <button id="equipment-toggle" aria-expanded="false">装备售卖 <span class="nav-caret">⌄</span></button>
           <button id="submarine-toggle" aria-expanded="false">潜水艇售卖 <span class="nav-caret">⌄</span></button>
+          <button data-page="leve">理符售卖</button>
+          <button data-page="trade">交易市场</button>
           <button id="guide-toggle" aria-expanded="false">材料指导价 <span class="nav-caret">⌄</span></button>
         </nav>
         <div class="app-save-state">本地数据已保存</div><button id="backup-toggle" class="app-utility-button" type="button">数据与更新</button>
@@ -845,15 +1221,18 @@ window.addEventListener('load', async () => {
       <div class="app-contextbar" aria-label="当前页面导航">
         <div id="equipment-subnav" class="context-nav subnav equipment-type-nav"><button data-equipment-category="combat">战职装备</button><button data-equipment-category="gathering">生产采集装备</button></div>
         <div id="submarine-subnav" class="context-nav subnav"><button data-submarine-view="summary">销售利润</button><button data-submarine-view="ledger">潜水艇台账</button></div>
-        <div id="guide-subnav" class="context-nav subnav"><button data-guide="crystals">水晶价格</button><button data-guide="basic">基础材料价格</button></div>
+        <div id="trade-subnav" class="context-nav subnav equipment-type-nav"><button data-trade-view="inventory">我的库存材料</button><button data-trade-view="recruitment">招募市场</button></div>
       </div>
       <main>
       <section id="home" class="view"><h1>营业总览</h1><div class="sub">按装备与潜水艇实际售卖记录汇总净利润和近 30 天趋势。</div><div id="metrics"></div><div id="overview-chart"></div></section>
       <section id="equipment" class="view"></section>
       <section id="submarine" class="view"></section>
+      <section id="leve" class="view"></section>
+      <section id="trade" class="view"></section>
       <section id="guide" class="view"></section>
       </main>
     </div>
+    <div id="trade-market-popover" class="trade-market-popover" role="tooltip" hidden></div>
     <dialog id="custom-sale"><form id="custom-sale-form" class="modal"><h2>自定义成交价销售</h2><label>套装 / 分项<select id="custom-row"></select></label><label>成交单价<input id="custom-price" type="number" min="0.01" step="1" required></label><button class="btn">保存销售</button></form></dialog>
     <dialog id="price-template-dialog"><form id="price-template-form" class="modal price-form"><h2 id="price-template-title">统一调整套装价格</h2><div class="sub">保存后会同步更新当前装备类型的所有职业组；之后仍可点击单行套装价进行单独覆盖。</div><label id="price-total-label">套装总价<input id="price-template-total" type="number" min="0" step="1"></label><label>防具价格<input id="price-template-armor" type="number" min="0" step="1"></label><label>首饰价格<input id="price-template-accessory" type="number" min="0" step="1"></label><label id="price-weapon-label">武器价格<input id="price-template-weapon" type="number" min="0" step="1"></label><div class="modal-actions"><button type="button" class="btn secondary" data-close="price-template-dialog">取消</button><button class="btn">保存统一价格</button></div></form></dialog>
     <dialog id="single-price-dialog"><form id="single-price-form" class="modal"><h2 id="single-price-title">调整套装价格</h2><label>套装价<input id="single-price-value" type="number" min="0" step="1"></label><div class="modal-actions"><button type="button" class="btn secondary" data-close="single-price-dialog">取消</button><button class="btn">保存</button></div></form></dialog>
@@ -864,6 +1243,10 @@ window.addEventListener('load', async () => {
     <dialog id="recipe-reference-dialog"><div class="modal price-form"><div class="header"><div><div id="recipe-reference-meta" class="meta">潜水艇配方参考</div><h2 id="recipe-reference-title">制作配方</h2><div class="sub">此处仅核对官方配方结构，不参与当前市场 / 兑换成本核算。</div></div><button class="btn secondary" data-close="recipe-reference-dialog">关闭</button></div><div id="recipe-reference-content"></div></div></dialog>
     <dialog id="purchase-dialog"><form id="purchase-form" class="modal price-form" novalidate><h2 id="purchase-title">记录采购</h2><label>日期<input id="purchase-date" type="date"></label><div id="purchase-voucher-summary" class="card" style="box-shadow:none;background:#f3f8f9" hidden></div><label id="purchase-kind-label">采购方式<select id="purchase-kind"></select></label><div id="purchase-kind-hint" class="sub" style="margin:-4px 0 10px" hidden></div><div id="purchase-direct-fields"><label>购买数量<input id="purchase-quantity" type="number" min="0" step="any"></label><label>税率<select id="purchase-tax"><option value="0.05">5%</option><option value="0">0%</option></select></label><label>单价<input id="purchase-unit" type="text" inputmode="decimal" autocomplete="off"></label><label>合价（含税）<input id="purchase-total" type="text" inputmode="decimal" autocomplete="off"></label></div><div id="purchase-exchange-fields" hidden><div id="purchase-exchange-note" class="sub"></div><label>兑换次数<input id="purchase-exchange-turns" type="number" min="0" step="any"></label><label id="purchase-source-price-label">凭证单价<input id="purchase-source-price" type="text" inputmode="decimal" autocomplete="off"></label><div id="purchase-exchange-summary" class="card" style="box-shadow:none;background:#f3f8f9"></div></div><p id="purchase-error" role="alert" style="margin:12px 0 0;color:#b5423a" hidden></p><div class="modal-actions"><button class="btn">保存采购</button></div></form></dialog>
     <dialog id="purchase-manager-dialog"><div class="modal"><div class="header"><div><div id="purchase-manager-meta" class="meta">材料采购</div><h2 id="purchase-manager-title">采购价格</h2><div id="purchase-manager-average" class="sub"></div></div><div><button id="purchase-manager-add" class="btn">+ 记录采购</button> <button class="btn secondary" data-close="purchase-manager-dialog">关闭</button></div></div><div id="purchase-manager-content"></div></div></dialog>
+    <dialog id="trade-listing-dialog"><form id="trade-listing-form" class="modal price-form" novalidate><div class="header"><div><div class="meta">交易市场 · 我的库存材料</div><h2 id="trade-listing-title">添加材料</h2><div class="sub">本机待售清单，不会变更采购、制作或潜水艇库存。</div></div><button type="button" class="btn secondary" data-close="trade-listing-dialog">关闭</button></div><input id="trade-listing-item-id" type="hidden"><input id="trade-listing-item-name" type="hidden"><label>搜索材料名称或物品 ID<input id="trade-listing-search" autocomplete="off" placeholder="输入名称或物品 ID"></label><div id="trade-listing-results" class="trade-search-results"></div><div id="trade-listing-selected" class="trade-selected-item">请先从搜索结果中选择材料。</div><label id="trade-listing-category-label">来源分类<select id="trade-listing-category"></select></label><div id="trade-listing-category-note" class="trade-input-reference">选择材料后自动识别来源分类。</div><label>组数<input id="trade-listing-groups" type="number" min="1" step="1" value="1" required></label><label>单价（G / 个）<input id="trade-listing-unit-price" type="number" min="1" step="1" required></label><div id="trade-listing-market-reference" class="trade-input-reference">市场参考价：请先选择材料。</div><div class="trade-total-preview"><span>合价</span><b id="trade-listing-total">0 G</b><small id="trade-listing-total-formula">组数 × 1000 × 单价</small></div><p id="trade-listing-error" role="alert" class="status" hidden></p><div class="modal-actions"><button class="btn">保存本机库存材料</button></div></form></dialog>
+    <dialog id="trade-quantity-dialog"><form id="trade-quantity-form" class="modal price-form" novalidate><div class="header"><div><div class="meta">交易市场 · 我的库存材料</div><h2>修改库存组数</h2><div id="trade-quantity-material" class="sub"></div></div><button type="button" class="btn secondary" data-close="trade-quantity-dialog">关闭</button></div><input id="trade-quantity-id" type="hidden"><label>组数<input id="trade-quantity-groups" type="number" min="1" step="1" required></label><p id="trade-quantity-error" role="alert" class="status" hidden></p><div class="modal-actions"><button class="btn">保存组数</button></div></form></dialog>
+    <dialog id="trade-unit-price-dialog"><form id="trade-unit-price-form" class="modal price-form" novalidate><div class="header"><div><div class="meta">交易市场 · 我的库存材料</div><h2>修改单价</h2><div id="trade-unit-price-material" class="sub"></div></div><button type="button" class="btn secondary" data-close="trade-unit-price-dialog">关闭</button></div><input id="trade-unit-price-id" type="hidden"><label>单价（G / 个）<input id="trade-unit-price-value" type="number" min="0.01" step="1" required></label><p id="trade-unit-price-error" role="alert" class="status" hidden></p><div class="modal-actions"><button class="btn">保存单价</button></div></form></dialog>
+    <div id="trade-context-menu" class="trade-context-menu" role="menu" hidden></div>
     <dialog id="craft-scrip-manual-dialog"><form id="craft-scrip-manual-form" class="modal price-form" novalidate><div class="header"><div><div class="meta">材料指导价 &gt; 工票材料</div><h2 id="craft-scrip-manual-title">维护本机工票兑换材料</h2><div class="sub">仅保存到本机配置，不会写入共享资料包，也不会影响其他用户。</div></div><button type="button" class="btn secondary" data-close="craft-scrip-manual-dialog">关闭</button></div><input id="craft-scrip-manual-id" type="hidden"><label>材料名称或物品 ID<input id="craft-scrip-manual-material" autocomplete="off" placeholder="例如 高浓缩炼金药 或 44848" required></label><div id="craft-scrip-manual-resolved" class="sub"></div><label>票种<select id="craft-scrip-manual-ticket"><option value="orange">巧手橙票</option><option value="purple">巧手紫票</option></select></label><label>所需工票<input id="craft-scrip-manual-cost" type="number" min="1" step="1" required></label><label>每次获得数量<input id="craft-scrip-manual-output" type="number" min="1" step="1" value="1" required></label><label>来源说明<input id="craft-scrip-manual-source" placeholder="例如 NPC 兑换 / 资料链接"></label><p id="craft-scrip-manual-error" role="alert" style="margin:12px 0 0;color:#b5423a" hidden></p><div class="modal-actions"><button type="button" class="btn secondary" data-close="craft-scrip-manual-dialog">取消</button><button class="btn">保存本机配置</button></div></form></dialog>
     <dialog id="submarine-sale-dialog"><form id="submarine-sale-form" class="modal"><h2 id="submarine-sale-title">确认潜水艇部件售卖</h2><div id="submarine-sale-summary" class="card" style="box-shadow:none;background:#f3f8f9"></div><label>出售数量<input id="submarine-sale-quantity" type="number" min="1" step="1" value="1"></label><label>实际单价<input id="submarine-sale-price" type="number" min="0.01" step="1" required></label><div class="modal-actions"><button type="button" class="btn secondary" data-close="submarine-sale-dialog">取消</button><button class="btn">确认售卖</button></div></form></dialog>
     <dialog id="submarine-suite-sale-dialog"><form id="submarine-suite-sale-form" class="modal"><h2 id="submarine-suite-sale-title">确认整套售卖</h2><div id="submarine-suite-sale-summary" class="card" style="box-shadow:none;background:#f3f8f9"></div><label>出售套数<input id="submarine-suite-sale-quantity" type="number" min="1" step="1" value="1"></label><label>实际单套成交价<input id="submarine-suite-sale-price" type="number" min="0.01" step="1" required></label><div class="modal-actions"><button type="button" class="btn secondary" data-close="submarine-suite-sale-dialog">取消</button><button class="btn">确认整套售卖</button></div></form></dialog>
@@ -1044,10 +1427,11 @@ window.addEventListener('load', async () => {
   }
 
   const guideMaterials = () => {
-    if (state.guideView === 'crystals') return data.m.filter(isCrystal);
+    if (state.basicCategory === 'crystals') return data.m.filter(isCrystal);
     if (state.basicCategory === 'equipment') return equipmentBaseMaterials();
     if (state.basicCategory === 'submarine') return submarineBaseMaterials().filter(showSubmarineGuideMaterial);
-    if (state.basicCategory === 'scrip') return craftScripExchangeMaterials(state.craftScripTicket);
+    if (state.basicCategory === 'leve') return leveBaseMaterials();
+    if (state.basicCategory === 'scrip') return craftScripExchangeMaterials();
     return data.m.filter(material => otherMaterialIds.includes(String(material.uid)));
   };
   const craftScripRoutesFor = (uid, ticket = null) => craftScripExchanges().filter(route => String(route.itemId) === String(uid) && (!ticket || route.ticket === ticket));
@@ -1092,13 +1476,22 @@ window.addEventListener('load', async () => {
     const batchCost = !missing.length ? rows.reduce((sum, row) => sum + Number(row.batchTotal), 0) : null;
     const yieldCount = Math.max(1, Number(spec.outputQuantity || spec.yield || recipe?.y || 1));
     const payout = Number(spec.maxPayout || 0);
-    const unitCost = batchCost == null ? null : batchCost / yieldCount;
+    const unitCost = batchCost == null ? null : craftedUnitComparisonCost(batchCost / yieldCount);
     return { ...spec, recipe, rows, batchCost, yieldCount, unitCost, payout, perScrip: unitCost != null && payout > 0 ? unitCost / payout : null, ready: !missing.length, reason: missing.join('；'), job: spec.job || craftJobName(recipe) };
   };
   const recommendedCraftScripCollectible = ticket => craftScripCollectibleCandidates(ticket)
     .map(craftScripCollectibleCost)
     .filter(spec => spec.ready && Number(spec.perScrip) > 0)
     .sort((left, right) => left.perScrip - right.perScrip)[0] || null;
+  // 工票兑换价不是市场价：由该票种当前最低成本收藏品换算为 Gil。
+  const craftScripExchangeGilCost = route => {
+    const recommendation = recommendedCraftScripCollectible(route.ticket);
+    if (!recommendation) return { recommendation: null, perTicket: null, total: null, unit: null };
+    const perTicket = Number(recommendation.perScrip || 0);
+    const total = perTicket * Number(route.ticketCost || 0);
+    const unit = total / Math.max(1, Number(route.outputQuantity || 1));
+    return { recommendation, perTicket, total, unit };
+  };
   const equipmentBaseMaterials = () => {
     const cacheKey = [state.equipmentCombatTier, state.equipmentGatheringTier].join('|');
     const cached = guideIndexCache.equipment.get(cacheKey);
@@ -1188,6 +1581,7 @@ window.addEventListener('load', async () => {
     const labels = [];
     if (equipmentBaseMaterials().some(item => String(item.uid) === String(material.uid))) labels.push('装备推荐材料');
     if (submarineBaseMaterials().some(item => String(item.uid) === String(material.uid)) || npcCandidate(material)) labels.push('潜水艇推荐材料');
+    if (leveBaseMaterials().some(item => String(item.uid) === String(material.uid))) labels.push('理符推荐材料');
     if (craftScripRoutesFor(material.uid).length) labels.push('工票材料');
     guideIndexCache.membership.set(uid, labels);
     return labels;
@@ -1224,6 +1618,7 @@ window.addEventListener('load', async () => {
     const ranges = [
       { key: 'equipment', label: '装备推荐材料', materials: equipmentBaseMaterials(), kind: basicKind },
       { key: 'submarine', label: '潜水艇推荐材料', materials: submarineBaseMaterials().filter(showSubmarineGuideMaterial), kind: submarineGuideKind },
+      { key: 'leve', label: '理符推荐材料', materials: leveBaseMaterials(), kind: leveGuideKind },
       { key: 'scrip', label: '工票材料', materials: craftScripExchangeMaterials(), kind: material => craftScripRoutesFor(material.uid).map(route => craftScripTicketLabel(route.ticket)).join('／') },
       { key: 'other', label: '其他材料', materials: data.m.filter(material => otherMaterialIds.includes(String(material.uid))), kind: () => '已加入的其他材料' }
     ];
@@ -1273,59 +1668,147 @@ window.addEventListener('load', async () => {
       const failed = [];
       const unavailable = [];
       const targetQuantity = 999;
-      // 每个物品最多返回 999 条挂单。小批次请求可避免一次解析大量挂单而卡住材料页。
-      const batchSize = 8;
-      const weightedListingPrice = listings => {
-        const valid = (Array.isArray(listings) ? listings : [])
-          .filter(listing => !listing.hq && Number(listing.pricePerUnit) > 0 && Number(listing.quantity) > 0)
-          .sort((left, right) => Number(left.pricePerUnit) - Number(right.pricePerUnit));
-        let remaining = targetQuantity, quantity = 0, total = 0;
-        valid.forEach(listing => {
+      // HQ 与 NQ 都可作为材料来源。先读取中国范围均价；仅可能成为最低成本的材料才读取单独大区库存。
+      const batchSize = 30;
+      const validMarketListings = listings => (Array.isArray(listings) ? listings : [])
+        .filter(listing => Number(listing.pricePerUnit) > 0 && Number(listing.quantity) > 0)
+        .sort((left, right) => Number(left.pricePerUnit) - Number(right.pricePerUnit));
+      const weightedListingPrice = (listings, limit = targetQuantity, useChinaFiftyListingRule = false) => {
+        const valid = validMarketListings(listings);
+        const firstFifty = valid.slice(0, 50);
+        const firstFiftyQuantity = firstFifty.reduce((sum, listing) => sum + Number(listing.quantity || 0), 0);
+        const sampledListings = useChinaFiftyListingRule && valid.length > 50 && firstFiftyQuantity < targetQuantity ? firstFifty : valid;
+        let remaining = limit, quantity = 0, total = 0;
+        sampledListings.forEach(listing => {
           if (remaining <= 0) return;
           const used = Math.min(remaining, Number(listing.quantity));
           quantity += used;
           total += Number(listing.pricePerUnit) * used;
           remaining -= used;
         });
-        return quantity > 0 ? { price: total / quantity, quantity } : null;
+        return quantity > 0 ? { price: total / quantity, quantity, cappedAtFifty: sampledListings === firstFifty } : null;
+      };
+      const npcMarketSnapshot = (listings, npcPrice) => {
+        const eligible = validMarketListings(listings).filter(listing => marketComparisonCost(listing.pricePerUnit) < npcPrice);
+        const eligibleQuantity = eligible.reduce((sum, listing) => sum + Number(listing.quantity || 0), 0);
+        const sampled = weightedListingPrice(eligible, MARKET_NPC_STOCK_THRESHOLD);
+        return {
+          eligibleQuantity,
+          rawPrice: Number(sampled?.price || 0),
+          comparisonPrice: marketComparisonCost(sampled?.price),
+          status: sampled ? 'checked' : 'no-listings'
+        };
+      };
+      const listingSummary = listings => (Array.isArray(listings) ? listings : [])
+        .filter(listing => Number(listing.pricePerUnit) > 0 && Number(listing.quantity) > 0)
+        .sort((left, right) => Number(left.pricePerUnit) - Number(right.pricePerUnit) || Number(right.quantity) - Number(left.quantity))
+        .slice(0, 10)
+        .map(listing => ({ pricePerUnit: Number(listing.pricePerUnit), quantity: Number(listing.quantity), hq: Boolean(listing.hq), retainerName: String(listing.retainerName || ''), worldName: String(listing.worldName || '') }));
+      const requestMarket = async url => {
+        let lastError = null;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          let timeout = null;
+          try {
+            const controller = new AbortController();
+            timeout = setTimeout(() => controller.abort(), 15000);
+            const response = await fetch(url, { signal: controller.signal });
+            if (!response.ok) throw new Error(`市场请求失败（${response.status}）`);
+            return await response.json();
+          } catch (error) {
+            lastError = error;
+            if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 450));
+          } finally {
+            if (timeout) clearTimeout(timeout);
+          }
+        }
+        throw lastError;
       };
       for (let index = 0; index < materials.length; index += batchSize) {
         const batch = materials.slice(index, index + batchSize);
         try {
-          const response = await fetch('https://universalis.app/api/v2/China/' + batch.map(item => item.uid).join(',') + '?listings=999&entries=0&hq=false');
-          if (!response.ok) throw new Error('市场价格获取失败。');
-          const body = await response.json();
-          // 多物品请求以 items 为键；单物品请求直接返回该物品对象。
-          const items = body.items || (body.itemID ? { [String(body.itemID)]: body } : {});
+          const ids = batch.map(item => item.uid).join(',');
+          const chinaBody = await requestMarket('https://universalis.app/api/v2/China/' + ids + '?listings=999&entries=0');
+          const chinaItems = chinaBody.items || (chinaBody.itemID ? { [String(chinaBody.itemID)]: chinaBody } : {});
           const refreshedAt = new Date().toLocaleString('zh-CN');
           batch.forEach(material => {
-            const info = items[String(material.uid)];
-            if (!info) {
-              material.marketStatus = 'not-found';
-              unavailable.push(material.uid);
-              return;
-            }
-            const sampled = weightedListingPrice(info.listings);
+            const info = chinaItems[String(material.uid)];
+            const sampled = weightedListingPrice(info?.listings, targetQuantity, true);
             if (sampled) {
               material.mp = sampled.price;
               material.u = refreshedAt;
               material.marketStatus = 'listing-weighted';
               material.marketSampleQuantity = sampled.quantity;
-              material.marketSampleTarget = targetQuantity;
+              material.marketSampleTarget = sampled.cappedAtFifty ? 50 : targetQuantity;
+              material.marketListings = listingSummary(info.listings);
             } else {
-              // 没有挂单时绝不清空旧快照，避免后续成本被一次空市场数据改写。
-              material.marketStatus = 'no-listings';
+              material.marketStatus = info ? 'no-listings' : 'not-found';
+              delete material.marketListings;
               if (!material.u) material.u = refreshedAt;
+              unavailable.push(material.uid);
             }
           });
-          failed.push(...(body.unresolvedItems || []).map(String));
+          invalidatePlans();
+          const needsDataCenterCheck = (material, npcPrice) => {
+            const market = marketComparisonCost(material.mp);
+            if (!(market > 0) || market >= npcPrice) return { required: false, reason: `中国区税后市场均价 ${money(material.mp)} × 1.05 不低于 NPC ${money(npcPrice)}` };
+            const costs = [];
+            if (recipeCandidatesFor(material.uid).length) costs.push(Number(selfCraftUnitCost(material.uid) || 0));
+            if (leveRecipeNode(material.uid)) costs.push(Number(leveRecipeUnitCost(material.uid, new Set(), false) || 0));
+            const self = Math.min(...costs.filter(cost => cost > 0));
+            if (Number.isFinite(self) && market >= self) return { required: false, reason: `中国区税后市场均价 ${money(material.mp)} × 1.05 不低于自制配方 ${money(self)}` };
+            return { required: true };
+          };
+          const candidateMaterials = batch.filter(material => {
+            const npcPrices = [...new Set([
+              Number(npcCandidate(material)?.price || 0),
+              Number(leveSourceRecord(material.uid)?.npc?.price || 0)
+            ].filter(price => price > 0))];
+            material.marketNpcSnapshots = Object.fromEntries(npcPrices.map(npcPrice => {
+              const check = needsDataCenterCheck(material, npcPrice);
+              return [marketNpcSnapshotKey(npcPrice), check.required ? { status: 'pending-data-center', checkedAt: refreshedAt } : { status: 'not-required', checkedAt: refreshedAt, reason: check.reason }];
+            }));
+            return Object.values(material.marketNpcSnapshots).some(snapshot => snapshot.status === 'pending-data-center');
+          });
+          const candidateIds = candidateMaterials.map(material => material.uid).join(',');
+          const dataCenters = candidateIds ? await Promise.all(CHINA_MARKET_DATA_CENTERS.map(async name => {
+            try {
+              const body = await requestMarket('https://universalis.app/api/v2/' + encodeURIComponent(name) + '/' + candidateIds + '?listings=999&entries=0');
+              return { name, items: body.items || (body.itemID ? { [String(body.itemID)]: body } : {}), unresolved: body.unresolvedItems || [] };
+            } catch (error) { return { name, error }; }
+          })) : [];
+          candidateMaterials.forEach(material => {
+            const perDataCenter = {};
+            dataCenters.forEach(dataCenter => {
+              if (dataCenter.error) { perDataCenter[dataCenter.name] = { status: 'error', updatedAt: refreshedAt }; return; }
+              const info = dataCenter.items[String(material.uid)];
+              const sample = weightedListingPrice(info?.listings);
+              perDataCenter[dataCenter.name] = sample
+                ? { status: 'listing-weighted', price: sample.price, quantity: sample.quantity, listingCount: validMarketListings(info.listings).length, updatedAt: refreshedAt }
+                : { status: info ? 'no-listings' : 'not-found', quantity: 0, updatedAt: refreshedAt };
+              failed.push(...dataCenter.unresolved.map(String));
+            });
+            material.marketDataCenters = perDataCenter;
+            Object.entries(material.marketNpcSnapshots).forEach(([key, snapshot]) => {
+              if (snapshot.status !== 'pending-data-center') return;
+              const npcPrice = Number(key);
+              snapshot.status = 'checked';
+              snapshot.dataCenters = Object.fromEntries(CHINA_MARKET_DATA_CENTERS.map(name => {
+                const entry = perDataCenter[name];
+                if (entry?.status === 'error') return [name, { status: 'error', eligibleQuantity: 0, updatedAt: refreshedAt }];
+                const info = dataCenters.find(dataCenter => dataCenter.name === name)?.items?.[String(material.uid)];
+                return [name, { ...npcMarketSnapshot(info?.listings, npcPrice), updatedAt: refreshedAt }];
+              }));
+            });
+          });
+          failed.push(...(chinaBody.unresolvedItems || []).map(String));
         } catch (error) {
           batch.forEach(material => {
             material.marketStatus = Number(material.mp) > 0 ? 'stale' : 'no-listings';
           });
           failed.push(...batch.map(material => String(material.uid)));
         }
-        if (index + batchSize < materials.length) await new Promise(resolve => setTimeout(resolve, 120));
+        // 每批最多 30 项；四大区库存只针对可能成为最低成本的材料请求。
+        if (index + batchSize < materials.length) await new Promise(resolve => setTimeout(resolve, 140));
       }
       localStorage.setItem('ff14-market-refreshed-at', String(Date.now()));
       invalidateNpcMaterials();
@@ -1343,20 +1826,21 @@ window.addEventListener('load', async () => {
       window.materialRefreshRunning = false;
       state.marketRefreshing = false;
       if (state.page === refreshPage && state.guideView === refreshView && state.page === 'guide' && state.guideView !== 'detail') renderGuide();
+      else if (state.page === refreshPage && state.page === 'trade') renderTrade();
     }
   }
   function visibleGuideMarketMaterials() {
-    if (state.guideView === 'crystals') return data.m.filter(material => isCrystal(material));
-    if (state.guideView !== 'basic') return [];
+    if (state.basicCategory === 'crystals') return data.m.filter(material => isCrystal(material));
     const materials = guideMaterials();
     if (state.basicCategory === 'other') return materials;
     if (state.basicCategory === 'scrip') return materials;
     const prefix = state.basicCategory + '-';
     const openKinds = Object.entries(state.guideCategories).filter(([key, open]) => open && key.startsWith(prefix)).map(([key]) => key.slice(prefix.length));
     const visible = !openKinds.length ? [] : materials.filter(material => {
-      if (state.basicCategory !== 'submarine') return openKinds.includes(basicKind(material));
-      return openKinds.includes(submarineGuideKind(material)) ||
-        (state.guideCategories['submarine-npc'] && submarineGuideKind(material) === 'NPC 购买材料');
+      if (state.basicCategory !== 'submarine' && state.basicCategory !== 'leve') return openKinds.includes(basicKind(material));
+      const kind = state.basicCategory === 'leve' ? leveGuideKind(material) : submarineGuideKind(material);
+      return openKinds.includes(kind) ||
+        (state.basicCategory === 'submarine' && state.guideCategories['submarine-npc'] && kind === 'NPC 购买材料');
     });
     const carriers = state.basicCategory === 'submarine'
       ? Object.keys(exchangeSources.carriers || {}).map(uid => data.m.find(material => String(material.uid) === uid)).filter(Boolean)
@@ -1390,6 +1874,7 @@ window.addEventListener('load', async () => {
         note.className = 'meta'; note.textContent = ' · ' + retainerSummary(info);
         const button = document.createElement('button');
         button.className = 'section-toggle'; button.dataset.retainer = material.uid; button.textContent = '雇员探险';
+        button.onclick = () => openRetainerDetail(material.uid);
         cell.append(note, button);
       });
     });
@@ -1424,8 +1909,8 @@ window.addEventListener('load', async () => {
   function renderGuide() {
     const root = document.querySelector('#guide');
     if (state.guideView === 'detail') return renderPurchaseDetail();
-    if (state.basicCategory === 'other') { loadItemIndex(); loadItemIconIndex(); }
-    const crystals = state.guideView === 'crystals';
+    if (state.basicCategory === 'other' || state.basicCategory === 'leve') { loadItemIndex(); loadItemIconIndex(); }
+    const crystals = state.basicCategory === 'crystals';
     const colors = { 火:'#df675c', 冰:'#62b9d7', 风:'#53ae72', 土:'#a98252', 雷:'#9672ce', 水:'#4a8bd8' };
     const fallbackCrystalIcon = element => `<svg class="crystal-icon" viewBox="0 0 32 38" aria-hidden="true"><path fill="${colors[element]}" d="M16 1 29 14 22 35H10L3 14Z"/><path fill="#fff8" d="m16 1 8 13-8 5z"/><path fill="#0002" d="m16 19 6 16H10z"/></svg>`;
     // 水晶与其他物品共用 HqHelper 的 NBB 图标机制；SVG 仅作 CDN 不可用时回退。
@@ -1443,26 +1928,46 @@ window.addEventListener('load', async () => {
         const titleMaterial = list[1] || list[0];
         return `<article class="crystal-card" style="--element:${colors[element]}"><h2>${crystalTitleIcon(titleMaterial, element)}${element}属性水晶</h2><table class="crystal-table"><tbody>${list.map(material => `<tr><td><div class="crystal-name">${crystalIcon(material, element)}<span>${material.n}<small class="crystal-tier"> · ${material.n.replace(element + '之','')}</small></span></div></td><td><small class="crystal-tier">市场平均价</small><br><span class="crystal-price">${marketPriceLabel(material)}</span></td><td><small class="crystal-tier">采购均价</small><br><b>${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</b></td><td><button class="btn secondary" data-purchase="${material.id}">采购</button></td></tr>`).join('')}</tbody></table></article>`;
       }).join('');
-      root.innerHTML = `<div class="header"><div><div class="meta">材料指导价 &gt; 水晶价格</div><h1>水晶价格</h1><div class="sub">市场平均价按 Universalis 中国区 NQ 挂单中最低价起前 999 个材料加权计算；采购均价基于全部历史含税采购记录。</div></div><button id="refresh-market" class="btn${state.marketRefreshing ? ' refreshing' : ''}" ${state.marketRefreshing ? 'disabled' : ''}>${state.marketRefreshing ? '刷新中…' : '统一刷新市场价'}</button></div>${state.marketMessage ? '<div class="status">'+state.marketMessage+'</div>' : ''}<div class="crystal-grid">${crystalCards}</div>`;
+      const crystalTabs = `<div class="basic-range-toolbar"><div class="basic-range-tabs" role="tablist" aria-label="材料范围"><button type="button" role="tab" data-basic-category="equipment">装备推荐材料</button><button type="button" role="tab" data-basic-category="submarine">潜水艇推荐材料</button><button type="button" role="tab" data-basic-category="leve">理符推荐材料</button><button type="button" role="tab" data-basic-category="crystals" class="active" aria-selected="true">水晶价格</button><button type="button" role="tab" data-basic-category="scrip">工票材料</button><button type="button" role="tab" data-basic-category="other">其他材料</button></div></div>`;
+      root.innerHTML = `<div class="header"><div><div class="meta">材料指导价 &gt; 水晶价格</div><h1>水晶价格</h1><div class="sub">市场参考价为 Universalis 中国区 HQ／NQ 挂单的加权价，已含 5% 市场税：最多按前 999 个材料加权；挂单超过 50 条但前 50 条未达 999 个时，仅取前 50 条。</div></div><button id="refresh-market" class="btn${state.marketRefreshing ? ' refreshing' : ''}" ${state.marketRefreshing ? 'disabled' : ''}>${state.marketRefreshing ? '刷新中…' : '统一刷新市场价'}</button></div>${state.marketMessage ? '<div class="status">'+state.marketMessage+'</div>' : ''}${crystalTabs}<div class="crystal-grid">${crystalCards}</div>`;
       root.querySelector('#refresh-market').onclick = () => refreshMarket(true);
       root.querySelectorAll('[data-purchase]').forEach(button => button.onclick = () => { const material = data.m.find(item => item.id === button.dataset.purchase); if (material) openPurchaseManager(material); });
+      root.querySelectorAll('[data-basic-category]').forEach(button => button.onclick = () => { state.basicCategory = button.dataset.basicCategory; renderGuide(); });
       maybeRefreshMarket();
       return;
     }
     const materials = guideMaterials();
-    const membershipTags = material => materialMembership(material).map(label => `<span class="material-tag">${label}</span>`).join('') || '<span class="meta">未添加</span>';
-    const materialTable = list => `<div class="table-wrap"><table class="ledger"><thead><tr><th>材料</th><th>分类</th><th>归属</th><th>市场平均价</th><th>采购平均价</th><th>最后刷新</th><th>采购价格</th></tr></thead><tbody>${list.map(material => {
-      const submarine = state.basicCategory === 'submarine', choice = submarine ? submarineSourceChoice(material) : null;
-      const kind = submarine ? submarineGuideKind(material) : basicKind(material), npc = submarine && choice.kind === 'NPC 购买材料' ? npcCandidate(material) : undefined;
-      const recommendation = submarine && showSubmarineRecommendationTag(material) ? recommendationTag(choice) : '';
+    const materialTable = list => `<div class="guide-material-grid">${list.map(material => {
+      const sourceAware = state.basicCategory === 'submarine' || state.basicCategory === 'leve';
+      const choice = state.basicCategory === 'leve' ? leveGuideChoice(material.uid) : sourceAware ? submarineSourceChoice(material) : null;
+      const recommendation = sourceAware && (state.basicCategory === 'leve'
+        ? leveGuideKind(material) !== '常规采集品'
+        : showSubmarineRecommendationTag(material)) ? recommendationTag(choice) : '';
       const name = itemLabelMarkup(material.uid, material.n);
-      const label = submarine && hasComparableSubmarineSources(material)
-        ? `<button class="bundle-link" data-source-detail="${material.uid}">${recommendation}${name}</button>`
+      const comparable = state.basicCategory === 'leve' ? choice.options?.filter(option => Number(option.price) > 0).length >= 2 : hasComparableSubmarineSources(material);
+      const detailAttribute = state.basicCategory === 'leve' ? 'data-leve-source-detail' : 'data-source-detail';
+      const label = sourceAware && (comparable || recipeCandidatesFor(material.uid).length || leveRecipeNode(material.uid))
+        ? `<button class="bundle-link" ${detailAttribute}="${material.uid}">${recommendation}${name}</button>`
         : `${recommendation}${name}`;
-      return `<tr class="${npc ? 'npc-row' : ''}" data-guide-material-row="${state.basicCategory}:${material.uid}"><td class="label">${label}</td><td>${kind}${submarine && choice.unavailable ? '<small class="meta"> · 待补价</small>' : ''}</td><td>${membershipTags(material)}</td><td>${marketPriceLabel(material)}</td><td>${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</td><td>${material.u || '—'}</td><td><button class="btn secondary" data-purchase="${material.id}">采购价格</button></td></tr>`;
-    }).join('') || '<tr><td colspan="7" class="empty">暂无材料</td></tr>'}</tbody></table></div>`;
-    const npcTable = list => `<div class="table-wrap"><table class="ledger"><thead><tr><th>材料</th><th>NPC 售卖价</th><th>采购平均价</th><th>自制价</th><th>购买来源</th><th>记录采购</th></tr></thead><tbody>${list.map(material => { const spec = npcCandidate(material), comparison = npcComparison(material.uid), purchase = purchaseAverage(material), craftable = comparison?.hasCraftRoute, choice = submarineSourceChoice(material), recommendation = recommendationTag(choice), name = itemLabelMarkup(material.uid, material.n); const label = hasComparableSubmarineSources(material) ? `<button class="bundle-link" data-source-detail="${material.uid}">${recommendation}${name}</button>` : `${recommendation}${name}`; return `<tr class="npc-row" data-guide-material-row="submarine:${material.uid}"><td class="label">${label}</td><td>${money(spec?.price)}</td><td>${purchase > 0 ? money(purchase) : '未采购'}</td><td>${craftable ? (comparison.self == null ? '等待市场价' : money(comparison.self)) : '—'}</td><td>${spec?.source || '—'}</td><td><button class="btn secondary" data-purchase="${material.id}">记录采购</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">暂无 NPC 固定材料</td></tr>'}</tbody></table></div>`;
-    const categoryTables = ['常规采集品', '限时采集品', '灵砂', '神典石材料', '怪物掉落', '能工巧匠工票兑换'].map(kind => {
+      return `<article class="guide-material-card" data-guide-material-row="${state.basicCategory}:${material.uid}"><div class="guide-material-card-title">${label}</div><dl class="guide-material-prices"><div><dt>市场价格参考</dt><dd>${marketPriceLabel(material)}</dd></div><div><dt>采购平均价</dt><dd>${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</dd></div></dl><button class="btn secondary guide-material-purchase" data-purchase="${material.id}">采购价格</button></article>`;
+    }).join('') || '<div class="empty">暂无材料</div>'}</div>`;
+    // “其他材料”搜索结果仍需要显示已有归属；普通分类卡片不再计算或展示该信息。
+    const membershipTags = material => materialMembership(material).map(label => `<span class="material-tag">${label}</span>`).join('') || '<span class="meta">未添加</span>';
+    const npcTable = (list, scope = 'submarine') => `<div class="table-wrap"><table class="ledger npc-material-table"><thead><tr><th>材料</th><th>NPC 售卖价</th><th>市场价格参考</th><th>采购平均价</th><th>自制价</th><th>购买渠道</th><th>记录采购</th></tr></thead><tbody>${list.map(material => {
+      const leve = scope === 'leve', record = leve ? leveSourceRecord(material.uid) : null;
+      const spec = leve ? record?.npc : npcCandidate(material), comparison = leve ? null : npcComparison(material.uid);
+      const purchase = purchaseAverage(material), craftable = leve ? Boolean(leveRecipeNode(material.uid)) : comparison?.hasCraftRoute;
+      const self = leve ? (craftable ? leveRecipeUnitCost(material.uid, new Set(), false) : null) : comparison?.self;
+      const choice = leve ? leveGuideChoice(material.uid) : submarineSourceChoice(material);
+      const recommendation = recommendationTag(choice), name = itemLabelMarkup(material.uid, material.n);
+      const comparable = leve ? choice.options?.filter(option => Number(option.price) > 0).length >= 2 : hasComparableSubmarineSources(material);
+      const label = comparable
+        ? `<button class="bundle-link" ${leve ? `data-leve-source-detail="${material.uid}"` : `data-source-detail="${material.uid}"`}>${recommendation}${name}</button>`
+        : `${recommendation}${name}`;
+      const source = spec?.source || '—';
+      return `<tr class="npc-row" data-guide-material-row="${scope}:${material.uid}"><td class="label">${label}</td><td>${Number(spec?.price) > 0 ? money(spec.price) : '待核验'}</td><td>${marketNpcPriceLabel(material, spec)}</td><td>${purchase > 0 ? money(purchase) : '未采购'}</td><td>${craftable ? (self == null ? '等待市场价' : money(self)) : '—'}</td><td class="label">${source}</td><td><button class="btn secondary" data-purchase="${material.id}">记录采购</button></td></tr>`;
+    }).join('') || '<tr><td colspan="7" class="empty">暂无 NPC 固定材料</td></tr>'}</tbody></table></div>`;
+    const categoryTables = state.basicCategory === 'equipment' ? ['常规采集品', '限时采集品', '灵砂', '神典石材料', '怪物掉落', '能工巧匠工票兑换'].map(kind => {
       const list = materials.filter(material => basicKind(material) === kind), key = 'equipment-' + kind;
       if (kind !== '能工巧匠工票兑换') return `<details class="material-category" data-material-category="${key}" ${state.guideCategories[key] ? 'open' : ''}><summary>${kind}<span>${list.length} 项 · 点击展开</span></summary>${state.guideCategories[key] ? materialTable(list) : ''}</details>`;
       const sections = ['orange', 'purple'].map(ticket => {
@@ -1471,12 +1976,15 @@ window.addEventListener('load', async () => {
         return `<details class="craft-scrip-subcategory" data-material-category="${subKey}" ${state.guideCategories[subKey] ? 'open' : ''}><summary>${craftScripTicketLabel(ticket)}<span>${routes.length} 项 · 点击展开</span></summary>${state.guideCategories[subKey] ? materialTable(routes) : ''}</details>`;
       }).join('');
       return `<details class="material-category" data-material-category="${key}" ${state.guideCategories[key] ? 'open' : ''}><summary>${kind}<span>${list.length} 项 · 点击展开</span></summary>${state.guideCategories[key] ? `<div class="craft-scrip-subcategories">${sections}</div>` : ''}</details>`;
-    }).join('');
-    const craftScripMaterialTable = list => `<div class="table-wrap"><table class="ledger"><thead><tr><th>材料</th><th>票种</th><th>兑换比例</th><th>市场平均价</th><th>采购平均价</th><th>最后刷新</th><th>详情</th></tr></thead><tbody>${list.map(material => {
-      const routes = craftScripRoutesFor(material.uid, state.craftScripTicket);
-      const ratio = routes.map(route => `${craftScripTicketLabel(route.ticket)} ×${route.ticketCost} → ${material.n} ×${route.outputQuantity || 1}`).join('<br>');
-      return `<tr data-guide-material-row="scrip:${material.uid}"><td class="label">${itemLabelMarkup(material.uid, material.n)}</td><td>${routes.map(route => `<span class="scrip-ticket ${route.ticket}">${craftScripTicketLabel(route.ticket)}</span>`).join('')}</td><td class="label">${ratio}</td><td>${marketPriceLabel(material)}</td><td>${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</td><td>${material.u || '—'}</td><td><button class="btn secondary" data-craft-scrip-detail="${material.uid}">查看详情</button></td></tr>`;
-    }).join('') || '<tr><td colspan="7" class="empty">此票种暂无已收录兑换材料。</td></tr>'}</tbody></table></div>`;
+    }).join('') : '';
+    const craftScripMaterialTable = (ticket, list = craftScripExchangeMaterials(ticket), emptyText = '此票种暂无已收录兑换材料。') => {
+      return `<div class="table-wrap"><table class="ledger"><thead><tr><th>材料</th><th>兑换比例</th><th>兑换价</th><th>市场平均价</th><th>采购平均价</th></tr></thead><tbody>${list.map(material => {
+        const routes = craftScripRoutesFor(material.uid, ticket);
+        const ratio = routes.map(route => `${craftScripTicketLabel(route.ticket)} ×${route.ticketCost} → ${material.n} ×${route.outputQuantity || 1}`).join('<br>');
+        const costs = routes.map(route => { const cost = craftScripExchangeGilCost(route); return cost.unit == null ? '等待补价' : `${money(cost.unit)}<small class="meta">（${money(cost.perTicket)} × ${route.ticketCost} ÷ ${route.outputQuantity}）</small>`; }).join('<br>');
+        return `<tr data-guide-material-row="scrip:${material.uid}"><td class="label">${itemLabelMarkup(material.uid, material.n)}</td><td class="label">${ratio}</td><td class="label">${costs}</td><td>${marketPriceLabel(material)}</td><td>${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</td></tr>`;
+      }).join('') || `<tr><td colspan="5" class="empty">${emptyText}</td></tr>`}</tbody></table></div>`;
+    };
     const craftScripRecommendation = ticket => {
       const recommendation = recommendedCraftScripCollectible(ticket), label = craftScripTicketLabel(ticket), candidates = craftScripCollectibleCandidates(ticket);
       if (!recommendation) {
@@ -1487,30 +1995,48 @@ window.addEventListener('load', async () => {
       const material = data.m.find(item => String(item.uid) === String(recommendation.itemId));
       return `<article class="craft-scrip-recommendation"><div class="meta">${label}最低成本收藏品</div><button class="bundle-link" data-craft-collectible-detail="${recommendation.itemId}">${itemLabelMarkup(recommendation.itemId, material?.n || recommendation.name || recommendation.itemId)}</button><dl><div><dt>制作职业</dt><dd>${recommendation.job}</dd></div><div><dt>单件制作成本</dt><dd>${money(recommendation.unitCost)}</dd></div><div><dt>最高档回报</dt><dd>${recommendation.payout} 张</dd></div><div><dt>每张票成本</dt><dd>${money(recommendation.perScrip)}</dd></div></dl><p>${money(recommendation.batchCost)} ÷ ${recommendation.yieldCount} 个 ÷ ${recommendation.payout} 张</p></article>`;
     };
-    const craftScripCatalog = ticket => {
+    const craftScripCatalog = () => {
       const grouped = new Map();
-      craftScripCollectibleCandidates(ticket).map(craftScripCollectibleCost).forEach(spec => {
+      ['orange', 'purple'].flatMap(craftScripCollectibleCandidates).map(craftScripCollectibleCost).forEach(spec => {
         const entries = grouped.get(spec.job) || [];
         entries.push(spec); grouped.set(spec.job, entries);
       });
-      const rows = [...grouped.entries()].map(([job, entries]) => `<tr class="craft-scrip-job-row"><th colspan="6">${job}</th></tr>${entries.sort((left, right) => left.level - right.level).map(spec => {
+      const rows = [...grouped.entries()].map(([job, entries]) => `<tr class="craft-scrip-job-row"><th colspan="7">${job}</th></tr>${entries.sort((left, right) => left.level - right.level).map(spec => {
         const status = spec.verified && spec.recipe ? (spec.ready ? '已核验' : '等待补价') : '待核验';
-        return `<tr><td class="label"><button class="bundle-link" data-craft-collectible-detail="${spec.itemId}">${itemLabelMarkup(spec.itemId, spec.name)}</button></td><td>${spec.level}</td><td>${spec.payout || '—'} 张</td><td>${spec.unitCost == null ? '等待补价' : money(spec.unitCost)}</td><td>${spec.perScrip == null ? '—' : money(spec.perScrip)}</td><td><span class="craft-scrip-status ${status === '已核验' ? 'verified' : 'pending'}">${status}</span></td></tr>`;
+        return `<tr><td class="label"><button class="bundle-link" data-craft-collectible-detail="${spec.itemId}">${itemLabelMarkup(spec.itemId, spec.name)}</button></td><td><span class="scrip-ticket ${spec.ticket}">${craftScripTicketLabel(spec.ticket)}</span></td><td>${spec.level}</td><td>${spec.payout || '—'} 张</td><td>${spec.unitCost == null ? '等待补价' : money(spec.unitCost)}</td><td>${spec.perScrip == null ? '—' : money(spec.perScrip)}</td><td><span class="craft-scrip-status ${status === '已核验' ? 'verified' : 'pending'}">${status}</span></td></tr>`;
       }).join('')}`).join('');
-      return `<section class="material-category craft-scrip-catalog"><div class="craft-scrip-exchange-heading"><div><b>${craftScripTicketLabel(ticket)}收藏品名录</b><span>按职业分组 · ${craftScripCollectibleCandidates(ticket).length} 项 · 成本按最高档回报计算</span></div></div><div class="table-wrap"><table class="ledger"><thead><tr><th>收藏品</th><th>等级</th><th>最高档回报</th><th>单件制作成本</th><th>每张票成本</th><th>资料状态</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">暂无该票种的收藏品资料。</td></tr>'}</tbody></table></div></section>`;
+      return `<details class="material-category craft-scrip-catalog"><summary>完整收藏品名录<span>八职业 · 56 项 · 点击展开</span></summary><div class="table-wrap"><table class="ledger"><thead><tr><th>收藏品</th><th>票种</th><th>等级</th><th>最高档回报</th><th>单件制作成本</th><th>每张票成本</th><th>资料状态</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">暂无收藏品资料。</td></tr>'}</tbody></table></div></details>`;
     };
     const craftScripManualRows = craftScripManualRoutes();
-    const craftScripManualPanel = `<section class="craft-scrip-manual-panel"><div class="craft-scrip-exchange-heading"><div><b>本机维护兑换材料</b><span>仅本机保存；只有被当前 770／750 配方使用的材料才会进入装备推荐分类。</span></div><button class="btn secondary" type="button" data-craft-scrip-manual-add>+ 添加材料</button></div>${craftScripManualRows.length ? `<div class="table-wrap"><table class="ledger"><thead><tr><th>材料</th><th>票种</th><th>兑换比例</th><th>来源说明</th><th>状态</th><th>操作</th></tr></thead><tbody>${craftScripManualRows.map(route => `<tr><td class="label">${itemLabelMarkup(route.itemId, data.m.find(item => String(item.uid) === route.itemId)?.n || route.name || route.itemId)}</td><td><span class="scrip-ticket ${route.ticket}">${craftScripTicketLabel(route.ticket)}</span></td><td>${craftScripTicketLabel(route.ticket)} ×${route.ticketCost} → ${Number(route.outputQuantity)} 个</td><td class="label">${route.source || '未填写'}</td><td>${route.active ? '启用' : '停用'}</td><td><button class="btn secondary" data-craft-scrip-manual-edit="${route.id}">编辑</button> <button class="btn secondary" data-craft-scrip-manual-toggle="${route.id}">${route.active ? '停用' : '启用'}</button> <button class="btn secondary" data-craft-scrip-manual-delete="${route.id}">删除</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">尚未添加本机维护项。共享资料包中的兑换数据不会在这里重复显示。</div>'}</section>`;
-    const craftScripContent = `<section class="craft-scrip-guide"><div class="craft-scrip-ticket-tabs" role="tablist" aria-label="能工巧匠工票种类">${['orange', 'purple'].map(ticket => `<button type="button" role="tab" data-craft-scrip-ticket="${ticket}" aria-selected="${state.craftScripTicket === ticket}" class="${state.craftScripTicket === ticket ? 'active' : ''}">${craftScripTicketLabel(ticket)}</button>`).join('')}</div><div class="craft-scrip-recommendations">${['orange', 'purple'].map(craftScripRecommendation).join('')}</div>${craftScripCatalog(state.craftScripTicket)}<section class="material-category craft-scrip-exchanges"><div class="craft-scrip-exchange-heading"><b>${craftScripTicketLabel(state.craftScripTicket)}兑换材料</b><span>${materials.length} 项</span></div>${craftScripMaterialTable(materials)}</section>${craftScripManualPanel}</section>`;
-    const searchResults = otherSearchResults(state.otherSearch);
+    const craftScripManualPanel = craftScripManualRows.length ? `<details class="material-category craft-scrip-manual-panel"><summary>本机维护的兑换材料<span>${craftScripManualRows.length} 项 · 点击展开</span></summary><div class="table-wrap"><table class="ledger"><thead><tr><th>材料</th><th>票种</th><th>兑换比例</th><th>来源说明</th><th>状态</th><th>操作</th></tr></thead><tbody>${craftScripManualRows.map(route => `<tr><td class="label">${itemLabelMarkup(route.itemId, data.m.find(item => String(item.uid) === route.itemId)?.n || route.name || route.itemId)}</td><td><span class="scrip-ticket ${route.ticket}">${craftScripTicketLabel(route.ticket)}</span></td><td>${craftScripTicketLabel(route.ticket)} ×${route.ticketCost} → ${Number(route.outputQuantity)} 个</td><td class="label">${route.source || '未填写'}</td><td>${route.active ? '启用' : '停用'}</td><td><button class="btn secondary" data-craft-scrip-manual-edit="${route.id}">编辑</button> <button class="btn secondary" data-craft-scrip-manual-toggle="${route.id}">${route.active ? '停用' : '启用'}</button> <button class="btn secondary" data-craft-scrip-manual-delete="${route.id}">删除</button></td></tr>`).join('')}</tbody></table></div></details>` : '';
+    const craftScripExchangeSection = ticket => {
+      const all = craftScripExchangeMaterials(ticket);
+      const equipmentIds = new Set(equipmentBaseMaterials().map(material => String(material.uid)));
+      const used = all.filter(material => equipmentIds.has(String(material.uid)));
+      const other = all.filter(material => !equipmentIds.has(String(material.uid)));
+      const otherKey = `scrip-other-${ticket}`;
+      return `<section class="material-category craft-scrip-exchanges"><div class="craft-scrip-exchange-heading"><div><b>${craftScripTicketLabel(ticket)}兑换材料</b><span>${used.length} 项当前装备可用 · ${other.length} 项其他材料 · Gil 兑换价按最低成本收藏品实时换算</span></div><button class="btn secondary" type="button" data-craft-scrip-manual-add="${ticket}">+ 添加${craftScripTicketLabel(ticket)}兑换材料</button></div><div class="craft-scrip-equipment-group"><div class="craft-scrip-group-label"><b>当前装备可用</b><span>当前 770／750 装备配方实际引用</span></div>${craftScripMaterialTable(ticket, used, '当前选择的 770／750 装备未使用该票种兑换材料。')}</div>${other.length ? `<details class="craft-scrip-subcategory" data-material-category="${otherKey}" ${state.guideCategories[otherKey] ? 'open' : ''}><summary>其他可兑换材料<span>${other.length} 项 · 点击展开</span></summary>${state.guideCategories[otherKey] ? craftScripMaterialTable(ticket, other) : ''}</details>` : ''}</section>`;
+    };
+    const craftScripContent = state.basicCategory === 'scrip' ? `<section class="craft-scrip-guide"><div class="craft-scrip-exchange-grid">${craftScripExchangeSection('orange')}${craftScripExchangeSection('purple')}</div><div class="craft-scrip-recommendations">${['orange', 'purple'].map(craftScripRecommendation).join('')}</div>${craftScripCatalog()}${craftScripManualPanel}</section>` : '';
+    const searchResults = state.basicCategory === 'other' ? otherSearchResults(state.otherSearch) : [];
     // 未纳入预生成索引的“其他材料”只在实际搜索或已加入列表中请求一次 Garland 资料，
     // 不会在首次进入材料页时批量访问外站。
-    if (state.otherSearch) searchResults.forEach(material => fetchGarlandIcon(material.uid));
-    materials.forEach(material => fetchGarlandIcon(material.uid));
-    const otherContent = `<div class="other-layout"><div class="card other-search-card"><div style="font-weight:700;margin-bottom:10px">搜索并加入其他材料</div><div class="sub">输入 Universalis 物品 ID 或中文名，例如：云杉原木 / 5395。</div><form id="other-material-form" style="display:flex;gap:8px;margin-top:12px"><input id="other-material-search" placeholder="材料 ID 或名称" value="${state.otherSearch}"><button class="btn">搜索</button></form>${state.otherSearch ? `<div class="table-wrap"><table class="ledger"><thead><tr><th>ID</th><th>材料</th><th>已归属</th><th>操作</th></tr></thead><tbody>${searchResults.map(material => { const stored = data.m.find(item => String(item.uid) === String(material.uid)) || { uid: material.uid, n: material.n }; const tags = membershipTags(stored); const joined = otherMaterialIds.includes(String(material.uid)); const used = materialMembership(stored).length; return `<tr><td>${material.uid}</td><td class="label">${itemLabelMarkup(material.uid, material.n)}</td><td>${tags}</td><td><button class="btn secondary" data-add-other="${material.uid}">${joined ? '已加入' : used ? '同时加入其他材料' : '加入'}</button></td></tr>`; }).join('') || `<tr><td colspan="4" class="empty">未找到相符道具，请确认名称或物品 ID。</td></tr>`}</tbody></table></div>` : ''}</div><div class="card other-added-card" style="padding:0"><div style="padding:12px 16px;font-weight:700;color:#244554">已加入的其他材料</div>${materials.length ? materialTable(materials) : '<div class="empty">尚未加入其他材料。可从左侧搜索结果中加入。</div>'}</div></div>`;
+    if (state.basicCategory === 'other') {
+      if (state.otherSearch) searchResults.forEach(material => fetchGarlandIcon(material.uid));
+      materials.forEach(material => fetchGarlandIcon(material.uid));
+    }
+    const otherContent = state.basicCategory === 'other' ? `<div class="other-layout"><div class="card other-search-card"><div style="font-weight:700;margin-bottom:10px">搜索并加入其他材料</div><div class="sub">输入 Universalis 物品 ID 或中文名，例如：云杉原木 / 5395。</div><form id="other-material-form" style="display:flex;gap:8px;margin-top:12px"><input id="other-material-search" placeholder="材料 ID 或名称" value="${state.otherSearch}"><button class="btn">搜索</button></form>${state.otherSearch ? `<div class="table-wrap"><table class="ledger"><thead><tr><th>ID</th><th>材料</th><th>已归属</th><th>操作</th></tr></thead><tbody>${searchResults.map(material => { const stored = data.m.find(item => String(item.uid) === String(material.uid)) || { uid: material.uid, n: material.n }; const tags = membershipTags(stored); const joined = otherMaterialIds.includes(String(material.uid)); const used = materialMembership(stored).length; return `<tr><td>${material.uid}</td><td class="label">${itemLabelMarkup(material.uid, material.n)}</td><td>${tags}</td><td><button class="btn secondary" data-add-other="${material.uid}">${joined ? '已加入' : used ? '同时加入其他材料' : '加入'}</button></td></tr>`; }).join('') || `<tr><td colspan="4" class="empty">未找到相符道具，请确认名称或物品 ID。</td></tr>`}</tbody></table></div>` : ''}</div><div class="card other-added-card" style="padding:0"><div style="padding:12px 16px;font-weight:700;color:#244554">已加入的其他材料</div>${materials.length ? materialTable(materials) : '<div class="empty">尚未加入其他材料。可从左侧搜索结果中加入。</div>'}</div></div>` : '';
     const submarineKinds = ['市场采购半成品', '常规采集品', '军票兑换', '薰衣草/风茄兑换', '天穹票兑换', '限时采集品', '怪物掉落', '潜水艇携带材料'];
-    const submarineTables = submarineKinds.map(kind => {
-      const list = materials.filter(material => submarineGuideKind(material) === kind).sort((left, right) => {
+    const submarineGroups = state.basicCategory === 'submarine'
+      ? materials.reduce((groups, material) => {
+        const kind = submarineGuideKind(material);
+        if (!groups.has(kind)) groups.set(kind, []);
+        groups.get(kind).push(material);
+        return groups;
+      }, new Map(submarineKinds.map(kind => [kind, []])))
+      : null;
+    const submarineTables = state.basicCategory === 'submarine' ? submarineKinds.map(kind => {
+      const list = (submarineGroups.get(kind) || []).sort((left, right) => {
         if (kind === '薰衣草/风茄兑换') {
           const leftVoucher = voucherCarrierIds.has(String(left.uid)), rightVoucher = voucherCarrierIds.has(String(right.uid));
           if (leftVoucher !== rightVoucher) return leftVoucher ? -1 : 1;
@@ -1519,25 +2045,46 @@ window.addEventListener('load', async () => {
       }), key = 'submarine-' + kind;
       const ticketSettingsPanel = kind === '天穹票兑换' ? `<form id="ticket-unit-cost-form" class="exchange-category-panel"><div class="sub" style="margin-top:14px">用于后续白钢、黄铜兑换成本预估；历史采购记录保留各自填写的票价快照。</div><label style="display:inline-grid;gap:5px;margin-top:10px">默认天穹票价格（G / 张）<input id="ticket-unit-cost" type="number" min="0.01" step="0.01" value="${ticketUnitCost()}"></label><div class="modal-actions" style="justify-content:flex-start;margin-top:10px"><button class="btn">保存默认价格</button><button type="button" id="reset-ticket-unit-cost" class="btn secondary">恢复 80 G / 张</button></div></form>` : '';
       return `<details class="material-category" data-material-category="${key}" ${state.guideCategories[key] ? 'open' : ''}><summary>${kind}<span>${list.length} 项 · 点击展开</span></summary>${state.guideCategories[key] ? ticketSettingsPanel + materialTable(list) : ''}</details>`;
-    }).join('');
+    }).join('') : '';
     const npcCategoryKey = 'submarine-npc', npcOpen = state.guideCategories[npcCategoryKey] ?? true;
-    const submarineContent = `<details class="material-category" data-material-category="${npcCategoryKey}" ${npcOpen ? 'open' : ''}><summary>NPC 购买材料<span>${submarineNpcMaterials().length} 项 · 固定价格</span></summary><div style="padding:0 16px 12px"><button id="manage-npc-materials" class="btn secondary">管理 NPC 材料</button></div>${npcTable(submarineNpcMaterials())}</details>${submarineTables}`;
+    const submarineContent = state.basicCategory === 'submarine' ? `<details class="material-category" data-material-category="${npcCategoryKey}" ${npcOpen ? 'open' : ''}><summary>NPC 购买材料<span>${submarineNpcMaterials().length} 项 · 固定价格</span></summary><div style="padding:0 16px 12px"><button id="manage-npc-materials" class="btn secondary">管理 NPC 材料</button></div>${npcTable(submarineNpcMaterials())}</details>${submarineTables}` : '';
+    const leveKinds = ['NPC 购买材料', '市场采购半成品', '常规采集品', '军票兑换', '薰衣草/风茄兑换', '天穹票兑换', '限时采集品', '怪物掉落', '待核验'];
+    const leveGroups = state.basicCategory === 'leve'
+      ? materials.reduce((groups, material) => {
+        const kind = leveGuideKind(material);
+        if (!groups.has(kind)) groups.set(kind, []);
+        groups.get(kind).push(material);
+        return groups;
+      }, new Map(leveKinds.map(kind => [kind, []])))
+      : null;
+    const leveTables = state.basicCategory === 'leve' ? leveKinds.map(kind => {
+      const list = (leveGroups.get(kind) || []).sort((left, right) => Number(left.uid) - Number(right.uid));
+      const key = 'leve-' + kind;
+      return `<details class="material-category" data-material-category="${key}" ${state.guideCategories[key] ? 'open' : ''}><summary>${kind}<span>${list.length} 项 · 点击展开</span></summary>${state.guideCategories[key] ? (kind === 'NPC 购买材料' ? npcTable(list, 'leve') : materialTable(list)) : ''}</details>`;
+    }).join('') : '';
+    const leveContent = state.basicCategory === 'leve' ? `<div class="note">按理符路线的交付物配方递归汇总。交付成品不按市场价计入成本；下级材料采用当前最低有效来源。</div>${leveTables}` : '';
     const basicContent = state.basicCategory === 'submarine'
       ? submarineContent
+      : state.basicCategory === 'leve' ? leveContent
       : state.basicCategory === 'scrip' ? craftScripContent
       : state.basicCategory === 'other' ? otherContent : categoryTables;
     const gradeSelects = state.basicCategory === 'equipment' ? `<div class="grade-selects"><label class="meta">战职装备品级<select id="combat-grade"><option value="770">770 HQ</option><option value="">无</option></select></label><label class="meta">生产采集装备品级<select id="gathering-grade"><option value="750">750 HQ</option><option value="">无</option></select></label></div>` : '';
+    const leveGuideSelects = state.basicCategory === 'leve' ? `<section class="leve-controls leve-guide-controls"><label>职业<select id="leve-guide-job"><option value="">全部职业</option>${(levequests.jobs || []).map(job => `<option value="${job}" ${job === state.leveGuideJob ? 'selected' : ''}>${job}</option>`).join('')}</select></label><label>当前等级<input id="leve-guide-start" type="number" min="1" max="99" step="1" placeholder="不限" value="${state.leveGuideStart}"></label><label>目标等级<input id="leve-guide-target" type="number" min="2" max="100" step="1" placeholder="不限" value="${state.leveGuideTarget}"></label></section>` : '';
     const basicSearchResults = basicMaterialSearchResults(state.basicMaterialSearch);
     const basicSearchValue = String(state.basicMaterialSearch).replace(/[&<>"]/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[character]));
     const basicSearch = `<form id="basic-material-search-form" class="basic-material-search" role="search"><input id="basic-material-search" value="${basicSearchValue}" placeholder="搜索材料名称或 ID" aria-label="搜索基础材料"><button class="btn secondary">搜索</button></form>`;
-    const basicSelect = `<div class="basic-range-toolbar"><div class="basic-range-tabs" role="tablist" aria-label="材料范围"><button type="button" role="tab" data-basic-category="equipment" aria-selected="${state.basicCategory === 'equipment'}" class="${state.basicCategory === 'equipment' ? 'active' : ''}">装备推荐材料</button><button type="button" role="tab" data-basic-category="submarine" aria-selected="${state.basicCategory === 'submarine'}" class="${state.basicCategory === 'submarine' ? 'active' : ''}">潜水艇推荐材料</button><button type="button" role="tab" data-basic-category="scrip" aria-selected="${state.basicCategory === 'scrip'}" class="${state.basicCategory === 'scrip' ? 'active' : ''}">工票材料</button><button type="button" role="tab" data-basic-category="other" aria-selected="${state.basicCategory === 'other'}" class="${state.basicCategory === 'other' ? 'active' : ''}">其他材料</button></div>${basicSearch}</div>${state.basicMaterialSearch ? `<div class="basic-material-search-results" aria-live="polite"><div class="meta">搜索结果 ${basicSearchResults.length} 项</div>${basicSearchResults.length ? `<div class="basic-material-search-list">${basicSearchResults.map((result, index) => `<button type="button" class="basic-material-search-result" data-basic-search-result="${index}"><b>${result.material.n}</b><span>ID ${result.material.uid}</span><em>${result.scopeLabel} · ${result.kind}</em></button>`).join('')}</div>` : '<div class="empty">未在基础材料目录中找到相符材料。</div>'}</div>` : ''}${gradeSelects}`;
+    const basicSelect = `<div class="basic-range-toolbar"><div class="basic-range-tabs" role="tablist" aria-label="材料范围"><button type="button" role="tab" data-basic-category="equipment" aria-selected="${state.basicCategory === 'equipment'}" class="${state.basicCategory === 'equipment' ? 'active' : ''}">装备推荐材料</button><button type="button" role="tab" data-basic-category="submarine" aria-selected="${state.basicCategory === 'submarine'}" class="${state.basicCategory === 'submarine' ? 'active' : ''}">潜水艇推荐材料</button><button type="button" role="tab" data-basic-category="leve" aria-selected="${state.basicCategory === 'leve'}" class="${state.basicCategory === 'leve' ? 'active' : ''}">理符推荐材料</button><button type="button" role="tab" data-basic-category="crystals" aria-selected="false">水晶价格</button><button type="button" role="tab" data-basic-category="scrip" aria-selected="${state.basicCategory === 'scrip'}" class="${state.basicCategory === 'scrip' ? 'active' : ''}">工票材料</button><button type="button" role="tab" data-basic-category="other" aria-selected="${state.basicCategory === 'other'}" class="${state.basicCategory === 'other' ? 'active' : ''}">其他材料</button></div>${basicSearch}</div>${state.basicMaterialSearch ? `<div class="basic-material-search-results" aria-live="polite"><div class="meta">搜索结果 ${basicSearchResults.length} 项</div>${basicSearchResults.length ? `<div class="basic-material-search-list">${basicSearchResults.map((result, index) => `<button type="button" class="basic-material-search-result" data-basic-search-result="${index}"><b>${result.material.n}</b><span>ID ${result.material.uid}</span><em>${result.scopeLabel} · ${result.kind}</em></button>`).join('')}</div>` : '<div class="empty">未在材料指导价目录中找到相符材料。</div>'}</div>` : ''}${gradeSelects}${leveGuideSelects}`;
     const coverage = baseMaterialMeta.coverage || {};
     const source = baseMaterialMeta.sources || {};
     const sourceNotice = `<div class="note">基础素材索引：770 ${coverage['770'] || 0}/77 · 750 ${coverage['750'] || 0}/39 · 非水晶基础材料 ${baseMaterialMeta.nonCrystalLeafCount || 0} 项；灰机 ${source.huiji || 0} 件 · nbb 回退 ${source.nbb || 0} 件。${baseMaterialMeta.missing?.length ? ` 未覆盖：${baseMaterialMeta.missing.join('、')}` : ''}</div>`;
     const basicHeader = state.basicCategory === 'equipment' ? sourceNotice : '';
-    root.innerHTML = `<div class="header"><div><div class="meta">材料指导价 &gt; 基础材料价格</div><h1>基础材料价格</h1><div class="sub">市场平均价按 Universalis 中国区 NQ 挂单中最低价起前 999 个材料加权计算；采购均价基于全部历史含税采购记录。</div></div><button id="refresh-market" class="btn${state.marketRefreshing ? ' refreshing' : ''}" ${state.marketRefreshing ? 'disabled' : ''}>${state.marketRefreshing ? '刷新中…' : '统一刷新市场价'}</button></div>${state.marketMessage ? '<div class="status">'+state.marketMessage+'</div>' : ''}${basicSelect + basicHeader + basicContent}`;
-    decorateRetainerNotes(root);
-    decorateSourceNotes(root);
+    root.innerHTML = `<div class="header"><div><div class="meta">材料指导价</div><h1>材料指导价</h1><div class="sub">市场参考价为 Universalis 中国区 HQ／NQ 挂单的加权价，已含 5% 市场税：最多按前 999 个材料加权；挂单超过 50 条但前 50 条未达 999 个时，仅取前 50 条。当它可能低于 NPC 与自制价时，才检查任一单个大区是否有至少 ${MARKET_NPC_STOCK_THRESHOLD} 个合格挂单。</div></div><button id="refresh-market" class="btn${state.marketRefreshing ? ' refreshing' : ''}" ${state.marketRefreshing ? 'disabled' : ''}>${state.marketRefreshing ? '刷新中…' : '统一刷新市场价'}</button></div>${state.marketMessage ? '<div class="status">'+state.marketMessage+'</div>' : ''}${basicSelect + basicHeader + basicContent}`;
+    const renderedCategory = state.basicCategory;
+    requestAnimationFrame(() => {
+      if (state.page !== 'guide' || state.guideView === 'detail' || state.basicCategory !== renderedCategory) return;
+      decorateRetainerNotes(root);
+      decorateSourceNotes(root);
+    });
     root.querySelector('#refresh-market').onclick = () => refreshMarket(true);
     root.querySelectorAll('[data-purchase]').forEach(button => button.onclick = () => {
       const material = data.m.find(item => item.id === button.dataset.purchase);
@@ -1555,7 +2102,7 @@ window.addEventListener('load', async () => {
       state.craftScripTicket = button.dataset.craftScripTicket;
       renderGuide();
     });
-    root.querySelector('[data-craft-scrip-manual-add]')?.addEventListener('click', () => openCraftScripManualDialog());
+    root.querySelectorAll('[data-craft-scrip-manual-add]').forEach(button => button.addEventListener('click', () => openCraftScripManualDialog(null, button.dataset.craftScripManualAdd)));
     root.querySelectorAll('[data-craft-scrip-manual-edit]').forEach(button => button.onclick = () => openCraftScripManualDialog(button.dataset.craftScripManualEdit));
     root.querySelectorAll('[data-craft-scrip-manual-toggle]').forEach(button => button.onclick = () => {
       const route = craftScripManualExchanges.find(item => String(item.id) === button.dataset.craftScripManualToggle);
@@ -1584,6 +2131,15 @@ window.addEventListener('load', async () => {
     const combatGrade = root.querySelector('#combat-grade'), gatheringGrade = root.querySelector('#gathering-grade');
     if (combatGrade) { combatGrade.value = state.equipmentCombatTier; combatGrade.onchange = () => { state.equipmentCombatTier = combatGrade.value; renderGuide(); }; }
     if (gatheringGrade) { gatheringGrade.value = state.equipmentGatheringTier; gatheringGrade.onchange = () => { state.equipmentGatheringTier = gatheringGrade.value; renderGuide(); }; }
+    root.querySelectorAll('#leve-guide-job,#leve-guide-start,#leve-guide-target').forEach(input => input.onchange = () => {
+      state.leveGuideJob = root.querySelector('#leve-guide-job').value;
+      state.leveGuideStart = root.querySelector('#leve-guide-start').value;
+      state.leveGuideTarget = root.querySelector('#leve-guide-target').value;
+      const start = Number(state.leveGuideStart || 0), target = Number(state.leveGuideTarget || 0);
+      if ((start && (start < 1 || start > 99)) || (target && (target < 2 || target > 100)) || (start && target && target <= start)) return alert('等级范围须在 1–100 级内，且目标等级高于当前等级。');
+      invalidateGuideIndexes();
+      renderGuide();
+    });
     const otherSearch = root.querySelector('#other-material-form');
     if (otherSearch) otherSearch.onsubmit = event => { event.preventDefault(); state.otherSearch = root.querySelector('#other-material-search').value.trim(); renderGuide(); };
     root.querySelectorAll('[data-add-other]').forEach(button => button.onclick = async () => {
@@ -1612,9 +2168,9 @@ window.addEventListener('load', async () => {
     };
     root.querySelectorAll('[data-npc-detail]').forEach(button => button.onclick = () => openNpcMaterialDetail(button.dataset.npcDetail));
     root.querySelectorAll('[data-source-detail]').forEach(button => button.onclick = () => openSubmarineMaterialSourceDetail(button.dataset.sourceDetail));
+    root.querySelectorAll('[data-leve-source-detail]').forEach(button => button.onclick = () => openLeveMaterialSourceDetail(button.dataset.leveSourceDetail));
     root.querySelectorAll('[data-craft-scrip-detail]').forEach(button => button.onclick = () => openCraftScripExchangeDetail(button.dataset.craftScripDetail));
     root.querySelectorAll('[data-craft-collectible-detail]').forEach(button => button.onclick = () => openCraftScripCollectibleDetail(button.dataset.craftCollectibleDetail));
-    root.querySelectorAll('[data-retainer]').forEach(button => button.onclick = () => openRetainerDetail(button.dataset.retainer));
     maybeRefreshMarket();
   }
   function openCraftScripExchangeDetail(uid) {
@@ -1627,7 +2183,7 @@ window.addEventListener('load', async () => {
     document.querySelector('#bundle-detail-content').innerHTML = `<div class="cards"><div class="card"><small>市场平均价</small><b>${marketPriceLabel(material)}</b><div class="meta">仅作市场采购参考</div></div><div class="card"><small>采购平均价</small><b>${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</b><div class="meta">历史采购均价</div></div></div><section class="sales-history"><h3>兑换比例</h3><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>票种</th><th>所需工票</th><th>获得数量</th><th>来源说明</th></tr></thead><tbody>${rows}</tbody></table></div><div class="note">工票仅代表取得方式，不会被虚构为金币固定价，也不改变市场价、采购均价或历史成本。</div></section>`;
     if (!document.querySelector('#bundle-detail-dialog').open) document.querySelector('#bundle-detail-dialog').showModal();
   }
-  function openCraftScripManualDialog(id = null) {
+  function openCraftScripManualDialog(id = null, ticketPreset = null) {
     loadItemIndex();
     const dialog = document.querySelector('#craft-scrip-manual-dialog');
     const route = id ? craftScripManualExchanges.find(item => String(item.id) === String(id)) : null;
@@ -1635,7 +2191,7 @@ window.addEventListener('load', async () => {
     document.querySelector('#craft-scrip-manual-title').textContent = route ? '编辑本机工票兑换材料' : '添加本机工票兑换材料';
     document.querySelector('#craft-scrip-manual-id').value = route?.id || '';
     document.querySelector('#craft-scrip-manual-material').value = route?.name || route?.itemId || '';
-    document.querySelector('#craft-scrip-manual-ticket').value = route?.ticket || state.craftScripTicket || 'orange';
+    document.querySelector('#craft-scrip-manual-ticket').value = route?.ticket || ticketPreset || 'orange';
     document.querySelector('#craft-scrip-manual-cost').value = route?.ticketCost || '';
     document.querySelector('#craft-scrip-manual-output').value = route?.outputQuantity || 1;
     document.querySelector('#craft-scrip-manual-source').value = route?.source || '';
@@ -1671,15 +2227,41 @@ window.addEventListener('load', async () => {
     const detail = craftScripCollectibleCost(spec), material = data.m.find(item => String(item.uid) === String(uid));
     document.querySelector('#bundle-detail-meta').textContent = '材料指导价 > 工票材料 > 收藏品成本';
     document.querySelector('#bundle-detail-title').textContent = (material?.n || spec.name || uid) + '收藏品成本';
-    const rows = detail.rows.map(row => `<tr><td class="label">${itemLabelMarkup(row.uid, materialName(row.uid))}</td><td>${row.batchQuantity}</td><td>${recommendationTag(row.choice, row.choice.label)}</td><td>${money(row.unit)}</td><td>${money(row.batchTotal)}</td></tr>`).join('');
+    const rows = detail.rows.map(row => `<tr><td class="label"><button class="bundle-link" data-craft-scrip-ingredient="${row.uid}" data-craft-scrip-root="${spec.itemId}">${itemLabelMarkup(row.uid, materialName(row.uid))}</button></td><td>${row.batchQuantity}</td><td>${recommendationTag(row.choice, row.choice.label)}</td><td>${money(row.unit)}</td><td>${money(row.batchTotal)}</td></tr>`).join('');
     document.querySelector('#bundle-detail-content').innerHTML = `<div class="cards"><div class="card"><small>制作职业</small><b>${detail.job}</b></div><div class="card"><small>每批产出</small><b>${detail.yieldCount} 个</b></div><div class="card"><small>最高档回报</small><b>${detail.payout || '待补充'} ${detail.payout ? `张 ${craftScripTicketLabel(detail.ticket)}` : ''}</b></div><div class="card"><small>每张票成本</small><b>${detail.perScrip == null ? '等待补价' : money(detail.perScrip)}</b></div></div>${detail.reason ? `<div class="note">${detail.reason}，该收藏品暂不参与最低成本推荐。</div>` : ''}<section class="sales-history"><h3>制作材料与成本</h3><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>材料</th><th>批次数量</th><th>采用方式</th><th>单价</th><th>批次合价</th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="empty">暂无可用配方</td></tr>'}</tbody><tfoot><tr><th colspan="4">批次材料合价 ÷ 每批产出 ÷ 最高档回报</th><th>${detail.batchCost == null ? '等待补价' : `${money(detail.batchCost)} ÷ ${detail.yieldCount} ÷ ${detail.payout}`}</th></tr></tfoot></table></div></section>`;
+    document.querySelectorAll('[data-craft-scrip-ingredient]').forEach(button => button.onclick = () => openCraftScripIngredientDetail(button.dataset.craftScripIngredient, spec.itemId, new Set([String(spec.itemId)])));
     if (!document.querySelector('#bundle-detail-dialog').open) document.querySelector('#bundle-detail-dialog').showModal();
+  }
+  function openCraftScripIngredientDetail(uid, rootId, trail = new Set()) {
+    uid = String(uid);
+    const material = data.m.find(item => String(item.uid) === uid) || { id: 'craft-scrip-' + uid, uid, n: materialName(uid) };
+    const recipe = recipeCandidatesFor(uid)[0];
+    const nextTrail = new Set(trail); nextTrail.add(uid);
+    const yieldCount = Math.max(1, Number(recipe?.y || 1));
+    const rows = (recipe?.a || []).reduce((result, _, index, list) => {
+      if (index % 2) return result;
+      const child = String(list[index]), quantity = Number(list[index + 1] || 0);
+      if (!child || !(quantity > 0)) return result;
+      const childMaterial = data.m.find(item => String(item.uid) === child) || { id: 'craft-scrip-' + child, uid: child, n: materialName(child) };
+      const choice = submarineCraftInputChoice(child, nextTrail), hasRecipe = recipeCandidatesFor(child).length > 0 && !nextTrail.has(child);
+      result.push(`<tr><td class="label">${hasRecipe ? `<button class="bundle-link" data-craft-scrip-ingredient="${child}" data-craft-scrip-root="${rootId}">${itemLabelMarkup(child, childMaterial.n)}</button>` : itemLabelMarkup(child, childMaterial.n)}</td><td>${quantity}</td><td>${choice.price > 0 ? money(choice.price) : '等待补价'}</td><td>${choice.price > 0 ? money(choice.price * quantity / yieldCount) : '—'}</td><td><button class="btn secondary" data-craft-scrip-purchase="${child}">记录采购</button></td></tr>`);
+      return result;
+    }, []).join('');
+    const root = (craftScrips.collectables || []).find(item => String(item.itemId) === String(rootId));
+    document.querySelector('#bundle-detail-meta').textContent = `材料指导价 > 工票材料 > ${root?.name || '收藏品'} > 下级材料`;
+    document.querySelector('#bundle-detail-title').textContent = material.n + (recipe ? '制作配方' : '基础材料');
+    document.querySelector('#bundle-detail-content').innerHTML = `<div class="modal-actions" style="justify-content:flex-start"><button class="btn secondary" data-craft-scrip-back="${rootId}">返回收藏品成本</button><button class="btn" data-craft-scrip-purchase="${uid}">记录采购</button></div><div class="cards"><div class="card"><small>市场平均价</small><b>${marketPriceLabel(material)}</b></div><div class="card"><small>采购平均价</small><b>${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</b></div>${recipe ? `<div class="card"><small>每批产出</small><b>${yieldCount} 个</b></div>` : ''}</div>${recipe ? `<section class="sales-history"><h3>直接制作素材</h3><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>材料</th><th>数量</th><th>当前单价</th><th>分摊合价</th><th>采购</th></tr></thead><tbody>${rows}</tbody></table></div></section>` : '<div class="note">该物品没有已收录制作配方，可直接记录采购价格。</div>'}`;
+    document.querySelectorAll('[data-craft-scrip-ingredient]').forEach(button => button.onclick = () => openCraftScripIngredientDetail(button.dataset.craftScripIngredient, rootId, nextTrail));
+    document.querySelectorAll('[data-craft-scrip-purchase]').forEach(button => button.onclick = () => {
+      const target = data.m.find(item => String(item.uid) === String(button.dataset.craftScripPurchase));
+      if (target) openPurchaseManager(target);
+    });
+    document.querySelector('[data-craft-scrip-back]')?.addEventListener('click', () => openCraftScripCollectibleDetail(rootId));
   }
   function openSubmarineMaterialSourceDetail(uid) {
     const material = data.m.find(item => String(item.uid) === String(uid));
     if (!material) return;
     const choice = submarineSourceChoice(material);
-    const rows = choice.options.map(option => `<tr class="${option.key === choice.key && option.key === 'npc' ? 'npc-row' : ''}"><td>${option.key === choice.key ? recommendationTag(option, '当前推荐') : ''}${option.label}</td><td>${Number(option.price) > 0 ? money(option.price) : '—'}</td><td class="label">${option.source}</td><td class="label"><small class="meta">${option.formula || '未获取有效价格'}</small></td></tr>`).join('');
     const craftRows = submarineCraftInputBreakdown(material.uid);
     const craftRecipe = recipeCandidatesFor(material.uid)[0], craftYield = Math.max(1, Number(craftRecipe?.y) || 1);
     const craftBatchTotal = craftRows.reduce((sum, row) => sum + row.batchTotal, 0), craftTotal = craftBatchTotal / craftYield;
@@ -1690,7 +2272,7 @@ window.addEventListener('load', async () => {
     const craftTable = craftRows.length ? `<section class="sales-history"><h3>自制成本采用的下级来源${craftYield > 1 ? ` · 每批产出 ${craftYield} 个` : ''}</h3><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>下级材料</th><th>数量</th><th>采用方式</th><th>单价</th><th>${craftYield > 1 ? '批次合价' : '合价'}</th></tr></thead><tbody>${craftRows.map(row => `<tr><td class="label">${itemLabelMarkup(row.uid, materialName(row.uid))}</td><td>${Number(row.batchQuantity.toFixed(4))}</td><td>${recommendationTag(row.choice, row.choice.label)}</td><td>${row.unit > 0 ? money(row.unit) : '未获取'}</td><td>${row.unit > 0 ? money(row.batchTotal) : '—'}</td></tr>`).join('')}</tbody><tfoot><tr><th colspan="4">${craftFooter}</th><th>${craftMissing ? '部分未获取' : money(craftTotal)}</th></tr></tfoot></table></div></section>` : '';
     document.querySelector('#bundle-detail-meta').textContent = '材料指导价 > 潜水艇推荐材料 > 来源比价';
     document.querySelector('#bundle-detail-title').textContent = material.n + '来源比价';
-    document.querySelector('#bundle-detail-content').innerHTML = `<div class="cards"><div class="card"><small>推荐方式</small><b>${choice.label}</b><div class="meta">${choice.source}</div></div><div class="card"><small>当前最低有效单价</small><b>${choice.price > 0 ? money(choice.price) : '待补价'}</b><div class="meta">仅比较有效的正数价格</div></div></div><section class="sales-history"><h3>取得方式单价对比</h3><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>渠道</th><th>单价</th><th>数据来源</th><th>计算依据</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="empty">暂无可用渠道</td></tr>'}</tbody></table></div></section>${craftTable}`;
+    document.querySelector('#bundle-detail-content').innerHTML = `<div class="cards"><div class="card"><small>推荐方式</small><b>${choice.label}</b><div class="meta">${choice.source}</div></div><div class="card"><small>当前最低有效单价</small><b>${choice.price > 0 ? money(choice.price) : '待补价'}</b><div class="meta">仅比较有效的正数价格</div></div></div>${sourceChoiceComparisonTable(choice)}${craftTable}`;
     if (!document.querySelector('#bundle-detail-dialog').open) document.querySelector('#bundle-detail-dialog').showModal();
   }
   function openNpcMaterialDetail(uid) {
@@ -1758,7 +2340,7 @@ window.addEventListener('load', async () => {
     const values = visible.map(row => Number(row.unitPrice || 0)).filter(Boolean);
     const quantity = visible.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
     const average = purchaseAverage(material);
-    document.querySelector('#purchase-manager-meta').textContent = isCrystal(material) ? '材料指导价 > 水晶价格' : '材料指导价 > 基础材料价格';
+    document.querySelector('#purchase-manager-meta').textContent = isCrystal(material) ? '材料指导价 > 水晶价格' : '材料指导价';
     document.querySelector('#purchase-manager-title').textContent = material.n + '采购价格';
     document.querySelector('#purchase-manager-average').textContent = `全历史采购均价：${purchaseAverage(material) ? money(purchaseAverage(material)) : '暂无采购记录'}`;
     document.querySelector('#purchase-manager-content').innerHTML = `<div class="purchase-stats"><div class="card metric"><small>本期最高单价</small><b>${values.length ? money(Math.max(...values)) : '—'}</b></div><div class="card metric"><small>本期最低单价</small><b>${values.length ? money(Math.min(...values)) : '—'}</b></div><div class="card metric"><small>采购平均单价</small><b>${average ? money(average) : '—'}</b></div></div><div class="filter"><button class="btn secondary" data-manager-period="week">周</button><button class="btn secondary" data-manager-period="month">月</button><button class="btn secondary" data-manager-period="year">年</button></div><div class="table-wrap"><table class="ledger"><thead><tr><th>日期</th><th>来源</th><th>购买数量</th><th>单价</th><th>税率</th><th>合价（含税）</th><th>操作</th></tr></thead><tbody>${visible.map(row => `<tr><td>${row.date}</td><td>${purchaseSourceLabel(row)}</td><td>${row.quantity}</td><td>${money(row.unitPrice)}</td><td>${Math.round(row.tax * 100)}%</td><td>${money(row.total)}</td><td><button class="btn secondary" data-manager-edit="${row.id}">编辑</button> <button class="btn secondary" data-manager-delete="${row.id}">删除</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">本期暂无采购记录</td></tr>'}</tbody></table></div>`;
@@ -1777,14 +2359,14 @@ window.addEventListener('load', async () => {
   }
   function renderPurchaseDetail() {
     const material = data.m.find(item => item.id === state.selectedMaterial);
-    if (!material) { state.guideView = 'crystals'; return renderGuide(); }
+    if (!material) { state.guideView = 'basic'; state.basicCategory = 'equipment'; return renderGuide(); }
     const visible = periodPurchases(material);
     const values = visible.map(row => row.unitPrice);
     const quantity = visible.reduce((sum, row) => sum + row.quantity, 0);
     const average = quantity ? visible.reduce((sum, row) => sum + row.total, 0) / quantity : 0;
-    const title = isCrystal(material) ? '水晶价格' : '基础材料价格';
+    const title = isCrystal(material) ? '水晶价格' : '材料指导价';
     document.querySelector('#guide').innerHTML = `<div class="header"><div><div class="meta">材料指导价 &gt; ${title} &gt; ${material.n}</div><h1>${material.n}采购价格</h1><div class="sub">采购均价 ${purchaseAverage(material) ? money(purchaseAverage(material)) : '未采购'}</div></div><div><button id="back-guide" class="btn secondary">← 返回材料价格</button> <button id="add-purchase" class="btn">+ 记录采购</button></div></div><div class="cards"><div class="card metric"><small>本期最高单价</small><b>${values.length ? money(Math.max(...values)) : '—'}</b></div><div class="card metric"><small>本期最低单价</small><b>${values.length ? money(Math.min(...values)) : '—'}</b></div><div class="card metric"><small>本期平均单价</small><b>${values.length ? money(average) : '—'}</b></div></div><div class="filter"><button class="btn secondary" data-period="week">周</button><button class="btn secondary" data-period="month">月</button><button class="btn secondary" data-period="year">年</button></div><div class="table-wrap"><table class="ledger"><thead><tr><th>日期</th><th>购买数量</th><th>单价</th><th>税率</th><th>合价（含税）</th><th>操作</th></tr></thead><tbody>${visible.map(row => `<tr><td>${row.date}</td><td>${row.quantity}</td><td>${money(row.unitPrice)}</td><td>${Math.round(row.tax * 100)}%</td><td>${money(row.total)}</td><td><button class="btn secondary" data-edit-purchase="${row.id}">编辑</button> <button class="btn secondary" data-delete-purchase="${row.id}">删除</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">本期暂无采购记录</td></tr>'}</tbody></table></div>`;
-    document.querySelector('#back-guide').onclick = () => { state.guideView = isCrystal(material) ? 'crystals' : 'basic'; state.selectedMaterial = null; render(); };
+    document.querySelector('#back-guide').onclick = () => { state.guideView = 'basic'; state.basicCategory = isCrystal(material) ? 'crystals' : state.basicCategory; state.selectedMaterial = null; render(); };
     document.querySelector('#add-purchase').onclick = () => openPurchase(material);
     document.querySelectorAll('[data-edit-purchase]').forEach(button => button.onclick = () => openPurchase(material, purchases.find(row => row.id === button.dataset.editPurchase)));
     document.querySelectorAll('[data-delete-purchase]').forEach(button => button.onclick = () => {
@@ -2095,9 +2677,8 @@ window.addEventListener('load', async () => {
   };
   const submarineMaterialSourceMarkup = material => {
     const choice = submarineSourceChoice(material);
-    const rows = choice.options.map(option => `<tr class="${option.key === choice.key && option.key === 'npc' ? 'npc-row' : ''}"><td>${option.key === choice.key ? recommendationTag(option, '当前推荐') : ''}${option.label}</td><td>${Number(option.price) > 0 ? money(option.price) : '—'}</td><td class="label">${option.source}</td><td class="label"><small class="meta">${option.formula || '未获取有效价格'}</small></td></tr>`).join('');
     const npc = npcCandidate(material);
-    return `<div class="cards"><div class="card"><small>当前推荐方式</small><b>${choice.label}</b><div class="meta">${choice.source}</div></div><div class="card"><small>当前参考单价</small><b>${choice.price > 0 ? money(choice.price) : '待补价'}</b><div class="meta">仅比较有效的正数价格</div></div>${npc ? `<div class="card"><small>NPC 购买来源</small><b>${money(npc.price)}</b><div class="meta">${npc.source || 'NPC 商店'}</div></div>` : ''}</div><section class="sales-history"><h3>取得方式单价对比</h3><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>渠道</th><th>单价</th><th>数据来源</th><th>计算依据</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="empty">暂无可用渠道</td></tr>'}</tbody></table></div></section>`;
+    return `<div class="cards"><div class="card"><small>当前推荐方式</small><b>${choice.label}</b><div class="meta">${choice.source}</div></div><div class="card"><small>当前参考单价</small><b>${choice.price > 0 ? money(choice.price) : '待补价'}</b><div class="meta">仅比较有效的正数价格</div></div>${npc ? `<div class="card"><small>NPC 购买来源</small><b>${money(npc.price)}</b><div class="meta">${npc.source || 'NPC 商店'}</div></div>` : ''}</div>${sourceChoiceComparisonTable(choice)}`;
   };
   function openSubmarineMaterialDetail(uid) {
     const material = data.m.find(item => String(item.uid) === String(uid));
@@ -2145,6 +2726,94 @@ window.addEventListener('load', async () => {
     document.querySelector('#recipe-reference-title').textContent = materialName(uid) + (includeSource ? '材料详情' : '制作配方参考');
     document.querySelector('#recipe-reference-content').innerHTML = `${includeSource ? submarineMaterialSourceMarkup(material) : ''}<div class="cards"><div class="card"><small>制作职业</small><b>${recipe.j === 0 ? '部队合建' : '职业 ' + recipe.j}</b></div><div class="card"><small>每批产出</small><b>${yieldCount}</b></div></div><section class="sales-history"><h3>直接制作素材</h3>${referenceTable(direct, '直接素材参考成本')}</section><section class="sales-history"><h3>当前最低来源制作成本</h3>${referenceTable(chosenCostRows, '按当前来源制作成本')}</section><section class="sales-history"><h3>递归基础素材参考</h3>${referenceTable(leafRows, '基础素材参考成本')}</section>`;
     document.querySelector('#recipe-reference-dialog').showModal();
+  }
+  function openLeveMaterialSourceDetail(uid) {
+    uid = String(uid || '');
+    const material = leveMaterial(uid);
+    if (!material) return;
+    const choice = leveCraftInputChoice(uid);
+    const craftRows = leveCraftInputBreakdown(uid);
+    const recipe = leveRecipeNode(uid), yieldCount = Math.max(1, Number(recipe?.y || 1));
+    const craftBatchTotal = craftRows.reduce((sum, row) => sum + Number(row.batchTotal || 0), 0);
+    const craftMissing = craftRows.some(row => !(Number(row.unit) > 0));
+    const craftUnit = leveRecipeUnitCost(uid, new Set(), false);
+    const craftTable = craftRows.length ? `<section class="sales-history"><h3>自制成本采用的下级来源${yieldCount > 1 ? ` · 每批产出 ${yieldCount} 个` : ''}</h3><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>下级材料</th><th>数量</th><th>采用方式</th><th>单价</th><th>${yieldCount > 1 ? '批次合价' : '合价'}</th></tr></thead><tbody>${craftRows.map(row => `<tr><td class="label">${itemLabelMarkup(row.uid, row.name)}</td><td>${Number(row.batchQuantity.toFixed(4))}</td><td>${recommendationTag(row.choice, row.choice.label)}</td><td>${row.unit > 0 ? money(row.unit) : '未获取'}</td><td>${row.unit > 0 ? money(row.batchTotal) : '—'}</td></tr>`).join('')}</tbody><tfoot><tr><th colspan="4">${yieldCount > 1 ? `批次合价 ${craftMissing ? '部分未获取' : money(craftBatchTotal)} ÷ 每批产出 ${yieldCount} 个` : '按当前来源制作成本'}</th><th>${craftMissing ? '部分未获取' : money(craftUnit || 0)}</th></tr></tfoot></table></div></section>` : '';
+    document.querySelector('#bundle-detail-meta').textContent = '材料指导价 > 理符推荐材料 > 来源比价';
+    document.querySelector('#bundle-detail-title').textContent = material.n + '来源比价';
+    document.querySelector('#bundle-detail-content').innerHTML = `<div class="cards"><div class="card"><small>推荐方式</small><b>${choice.label}</b><div class="meta">${choice.source}</div></div><div class="card"><small>当前最低有效单价</small><b>${choice.price > 0 ? money(choice.price) : '待补价'}</b><div class="meta">仅比较有效的正数价格</div></div></div>${sourceChoiceComparisonTable(choice)}${craftTable}`;
+    if (!document.querySelector('#bundle-detail-dialog').open) document.querySelector('#bundle-detail-dialog').showModal();
+  }
+  function openLeveRecipeReference(uid, isDelivery = false) {
+    uid = String(uid || '');
+    const recipe = leveRecipeNode(uid), material = leveMaterial(uid);
+    document.querySelector('#bundle-detail-meta').textContent = '理符售卖 > 交付物制作成本';
+    document.querySelector('#bundle-detail-title').textContent = (material?.n || materialName(uid)) + '详情';
+    if (!recipe) {
+      document.querySelector('#bundle-detail-content').innerHTML = `<div class="note">Garland Tools 未导入该交付物的制作配方；该物品不能作为制作流程或递归成本计算依据。</div>`;
+      document.querySelector('#bundle-detail-dialog').showModal();
+      return;
+    }
+    const yieldCount = Math.max(1, Number(recipe.y) || 1);
+    const sourceChoiceFor = itemId => leveCraftInputChoice(itemId);
+    const isNpcTerminal = itemId => sourceChoiceFor(itemId).key === 'npc';
+    const isExchangeTerminal = itemId => isExchangeChoice(sourceChoiceFor(itemId));
+    const isMarketTerminal = itemId => ['direct-purchase', 'direct-market'].includes(sourceChoiceFor(itemId).key);
+    const isMarketIntermediate = itemId => isMarketTerminal(itemId) && Boolean(leveRecipeNode(itemId));
+    const isTerminal = itemId => sourceChoiceFor(itemId).key !== 'craft';
+    const makeRequest = (itemId, quantity) => {
+      const choice = sourceChoiceFor(itemId), unit = Number(choice.price || 0);
+      return { uid: Number(itemId), name: leveMaterial(itemId)?.n || materialName(itemId), quantity: Number(quantity || 0), cost: unit * Number(quantity || 0), sourceChoice: choice };
+    };
+    const merge = requests => {
+      const rows = new Map();
+      requests.forEach(request => {
+        const key = String(request.uid), previous = rows.get(key) || { ...request, quantity: 0, cost: 0, pinnedNpc: isNpcTerminal(request.uid), pinnedExchange: isExchangeTerminal(request.uid), pinnedMarket: isMarketIntermediate(request.uid) };
+        previous.quantity += Number(request.quantity || 0);
+        previous.cost += Number(request.cost || 0);
+        rows.set(key, previous);
+      });
+      return [...rows.values()].sort((left, right) => Number(right.pinnedNpc) - Number(left.pinnedNpc) || Number(right.pinnedExchange) - Number(left.pinnedExchange) || Number(right.pinnedMarket) - Number(left.pinnedMarket) || left.uid - right.uid);
+    };
+    const recipeInputs = (itemId, quantity) => {
+      const node = leveRecipeNode(itemId);
+      if (!node) return [];
+      const unitQuantity = Number(quantity || 0) / Math.max(1, Number(node.y) || 1);
+      return Array.from({ length: node.a.length / 2 }, (_, index) => makeRequest(node.a[index * 2], unitQuantity * Number(node.a[index * 2 + 1] || 0))).filter(row => row.uid && row.quantity > 0);
+    };
+    // 一个交付物为成本单位：根物品固定按 Garland 配方展开，后续节点才比较最低有效来源。
+    const direct = merge(recipeInputs(uid, 1));
+    const basicRequests = [], expandBasic = (request, trail = new Set()) => {
+      const key = `${request.uid}@${leveRecipeNode(request.uid)?.id || 'base'}`;
+      if (trail.has(key) || isTerminal(request.uid) || !leveRecipeNode(request.uid)) { basicRequests.push(request); return; }
+      const next = new Set(trail); next.add(key);
+      recipeInputs(request.uid, request.quantity).forEach(child => expandBasic(child, next));
+    };
+    direct.forEach(request => expandBasic(request));
+    const basic = merge(basicRequests), unitCost = leveRecipeUnitCost(uid, new Set(), false, !isDelivery);
+    const missing = basic.filter(row => !(Number(row.sourceChoice?.price) > 0)).map(row => row.name);
+    const finished = [{ uid: Number(uid), name: material?.n || materialName(uid), quantity: 1, cost: Number(unitCost || 0), hq: isDelivery }];
+    const leveCostTable = (rows, label, total, grouped = false) => {
+      const visibleRows = rows;
+      const rowHtml = row => {
+        const missingCost = !(Number(row.cost) > 0) && Number(row.quantity) > 0;
+        const unit = Number(row.quantity) ? Number(row.cost || 0) / Number(row.quantity) : 0;
+        const tag = grouped && row.sourceChoice && (row.pinnedNpc || row.pinnedExchange || row.pinnedMarket) ? recommendationTag(row.sourceChoice) : '';
+        const name = row.timeSurcharge ? `<span class="item-label"><span>${row.name}</span></span>` : `<button class="submarine-material-link" data-leve-recipe-purchase="${row.uid}">${itemLabelMarkup(row.uid, row.name, row.hq ? { hq: true } : {})}</button>`;
+        return `<tr><td class="label">${tag}${name}</td><td>${Number(row.quantity.toFixed(4))}</td><td>${missingCost ? '未获取' : money(unit)}</td><td>${missingCost ? '—' : money(row.cost)}</td></tr>`;
+      };
+      const sections = grouped ? [
+        ['NPC 固定价材料', visibleRows.filter(row => row.pinnedNpc)],
+        ['兑换推荐材料', visibleRows.filter(row => !row.pinnedNpc && row.pinnedExchange)],
+        ['市场采购材料', visibleRows.filter(row => !row.pinnedNpc && !row.pinnedExchange && row.pinnedMarket)],
+        ['其余材料', visibleRows.filter(row => !row.pinnedNpc && !row.pinnedExchange && !row.pinnedMarket)]
+      ].filter(([, entries]) => entries.length).map(([title, entries]) => `<tr class="detail-section"><td colspan="4">${title}</td></tr>${entries.map(rowHtml).join('')}`).join('') : rows.map(rowHtml).join('');
+      const incomplete = visibleRows.some(row => !(Number(row.cost) > 0) && Number(row.quantity) > 0);
+      return `<div class="table-wrap history-table"><table class="ledger"><thead><tr><th>材料 / 成品</th><th>数量</th><th>单价</th><th>合价</th></tr></thead><tbody>${sections || '<tr><td colspan="4" class="empty">暂无配方数据</td></tr>'}</tbody><tfoot><tr><th colspan="3">${label}</th><th>${incomplete ? '部分未获取' : money(total)}</th></tr></tfoot></table></div>`;
+    };
+    const source = recipe.sourceUrl ? `<a href="${recipe.sourceUrl}" target="_blank" rel="noreferrer">查看 Garland 配方</a>` : 'Garland 来源未记录';
+    document.querySelector('#bundle-detail-content').innerHTML = `${missing.length ? `<div class="status">以下基础材料未获取单价：${[...new Set(missing)].join('、')}。</div>` : ''}<div class="detail-columns three"><section class="detail-column"><h3>成品清单</h3>${leveCostTable(finished, '成品清单总成本', unitCost || 0)}</section><section class="detail-column"><h3>直接素材</h3>${leveCostTable(direct, '直接素材总成本', unitCost || 0, true)}</section><section class="detail-column"><h3>基础素材</h3>${leveCostTable(basic, '基础素材总成本', unitCost || 0, true)}</section></div><p class="meta" style="margin-top:14px">${source} · 以制作 1 个${isDelivery ? ' HQ 交付物' : '材料'}为成本口径；每批产出 ${yieldCount} 个。</p>`;
+    document.querySelectorAll('[data-leve-recipe-purchase]').forEach(button => button.onclick = () => { const target = leveMaterial(button.dataset.leveRecipePurchase); if (target) openPurchaseManager(target); });
+    document.querySelector('#bundle-detail-dialog').showModal();
   }
   // 潜水艇详情的合建层保持工房根配方；下层只沿统一生产计划实际展开的节点展示。
   // 这样 NPC、市场与兑换成本终点不会泄漏下级素材，且每一栏都能复用同一份批次成本分摊。
@@ -2247,7 +2916,8 @@ window.addEventListener('load', async () => {
     document.querySelector('#bundle-detail-title').textContent = part.n + '详情';
     const direct = layers.direct;
     const basic = showBasicNpc ? layers.basic : layers.basic.filter(row => !row.pinnedNpc);
-    document.querySelector('#bundle-detail-content').innerHTML = `${plan.missing.length ? `<div class="status">以下基础材料未获取单价：${plan.missing.join('、')}。</div>` : ''}<div class="detail-columns four"><section class="detail-column"><h3>成品清单</h3>${costTable(plan.finished, '成品清单总成本', plan.total, { submarine: true })}</section><section class="detail-column"><h3>合建制作材料</h3>${costTable(layers.assembly, '合建制作材料总成本', plan.total, { submarine: true })}</section><section class="detail-column"><h3>直接素材</h3>${costTable(direct, '直接素材总成本', plan.total, { npcSection: true, sourceSections: true, submarine: true })}</section><section class="detail-column"><h3>基础素材 <button class="section-toggle" data-sub-detail-basic>${showBasicNpc ? '隐藏 NPC 材料' : '显示 NPC 材料'}</button></h3>${costTable(basic, '基础素材总成本', plan.total, { npcSection: showBasicNpc, sourceSections: true, submarine: true })}</section></div><section class="sales-history"><div class="history-head"><h3>历史销售记录</h3></div><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>日期</th><th>销售额</th><th>销售成本</th><th>利润</th></tr></thead><tbody>${history.map(entry => `<tr><td>${entry.date}</td><td>${money(entry.amount)}</td><td>${money(entry.cost)}</td><td class="profit">${money(entry.profit)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">暂无销售记录</td></tr>'}</tbody></table></div></section>`;
+    const costOptions = { timeCost: plan.timeCost, craftedOutputs: plan.craftedOutputs };
+    document.querySelector('#bundle-detail-content').innerHTML = `${plan.missing.length ? `<div class="status">以下基础材料未获取单价：${plan.missing.join('、')}。</div>` : ''}<div class="detail-columns four"><section class="detail-column"><h3>成品清单</h3>${costTable(plan.finished, '成品清单总成本', plan.total, { ...costOptions, submarine: true })}</section><section class="detail-column"><h3>合建制作材料</h3>${costTable(layers.assembly, '合建制作材料总成本', plan.total, { ...costOptions, submarine: true })}</section><section class="detail-column"><h3>直接素材</h3>${costTable(direct, '直接素材总成本', plan.total, { ...costOptions, npcSection: true, sourceSections: true, submarine: true })}</section><section class="detail-column"><h3>基础素材 <button class="section-toggle" data-sub-detail-basic>${showBasicNpc ? '隐藏 NPC 材料' : '显示 NPC 材料'}</button></h3>${costTable(basic, '基础素材总成本', plan.basicTotal, { ...costOptions, reconcile: false, npcSection: showBasicNpc, sourceSections: true, submarine: true })}</section></div><section class="sales-history"><div class="history-head"><h3>历史销售记录</h3></div><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>日期</th><th>销售额</th><th>销售成本</th><th>利润</th></tr></thead><tbody>${history.map(entry => `<tr><td>${entry.date}</td><td>${money(entry.amount)}</td><td>${money(entry.cost)}</td><td class="profit">${money(entry.profit)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">暂无销售记录</td></tr>'}</tbody></table></div></section>`;
     document.querySelector('[data-sub-detail-basic]').onclick = () => openSubmarineDetail(part, !showBasicNpc);
     document.querySelectorAll('[data-submarine-material-detail]').forEach(button => button.onclick = () => openSubmarineMaterialDetail(Number(button.dataset.submarineMaterialDetail)));
     if (!document.querySelector('#bundle-detail-dialog').open) document.querySelector('#bundle-detail-dialog').showModal();
@@ -2265,6 +2935,466 @@ window.addEventListener('load', async () => {
     document.querySelector('#bundle-detail-content').innerHTML = `<div class="cards"><div class="card"><small>剩余套数</small><b>${suiteStock(suite)}</b></div><div class="card"><small>每套成本</small><b>${money(cost)}</b></div><div class="card"><small>建议售价</small><b>${money(price)}</b></div><div class="card"><small>预计利润</small><b>${money(price - cost)}</b></div></div><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>部位</th><th>部件</th><th>库存</th><th>单件成本</th></tr></thead><tbody>${parts.map(part => `<tr><td>${part.part}</td><td class="label"><button class="bundle-link" data-suite-part-detail="${part.id}">${itemLabelMarkup(part.id, part.n)}</button></td><td>${submarineStock(part).q}</td><td>${money(submarineStock(part).q ? submarineStock(part).v / submarineStock(part).q : productionPlan(submarineRow(part)).total)}</td></tr>`).join('')}</tbody></table></div><section class="sales-history"><h3>整套销售历史</h3>${salesTable(history.map(row => ({ ...row, source: '潜水艇整套' })))}</section>`;
     document.querySelectorAll('[data-suite-part-detail]').forEach(button => button.onclick = () => openSubmarineDetail(submarineData.parts.find(part => String(part.id) === button.dataset.suitePartDetail)));
     if (!document.querySelector('#bundle-detail-dialog').open) document.querySelector('#bundle-detail-dialog').showModal();
+  }
+  const tradeMaterial = itemId => data.m.find(material => String(material.uid) === String(itemId));
+  const tradeCategoryOrder = ['botanist', 'miner', 'combat', 'crystal', 'other'];
+  const tradeCategoryLabels = { botanist: '园艺', miner: '采矿', combat: '战职', crystal: '水晶', other: '其他' };
+  const tradeDisplayName = material => material?.n || material?.name || '';
+  const isTradeCrystal = material => isCrystal({ n: tradeDisplayName(material) });
+  const staticTradeCategoryCandidates = material => {
+    if (isTradeCrystal(material)) return ['crystal'];
+    const uid = String(material?.uid || material?.itemId || '');
+    const source = materialSources[uid] || {};
+    const categories = new Set((source.tradeCategories || []).filter(category => tradeCategoryOrder.includes(category)));
+    if (retainerData[uid]?.job === '园艺工') categories.add('botanist');
+    if (retainerData[uid]?.job === '采矿工') categories.add('miner');
+    const kinds = [...(source.nativeSubmarineKinds || []), ...(source.submarineKinds || []), ...(source.equipmentKinds || [])];
+    if (kinds.includes('怪物掉落')) categories.add('combat');
+    return [...categories].sort((left, right) => tradeCategoryOrder.indexOf(left) - tradeCategoryOrder.indexOf(right));
+  };
+  const sortTradeCategories = categories => [...new Set(categories || [])]
+    .filter(category => tradeCategoryOrder.includes(category))
+    .sort((left, right) => tradeCategoryOrder.indexOf(left) - tradeCategoryOrder.indexOf(right));
+  const tradeSourceParserVersion = 2;
+  const garlandItemSourceUrl = uid => `https://www.garlandtools.org/db/doc/item/en/3/${encodeURIComponent(uid)}.json`;
+  const garlandCoreSourceUrl = 'https://www.garlandtools.org/db/doc/core/en/3/data.json';
+  const garlandCoreCacheIsFresh = cache => cache?.version === garlandVentureCoreCacheVersion
+    && cache?.ventureIndex && cache?.jobCategories
+    && Date.now() - Date.parse(cache.fetchedAt || '') < garlandVentureCoreCacheTtl;
+  const compactGarlandVentureCore = core => ({
+    version: garlandVentureCoreCacheVersion,
+    fetchedAt: new Date().toISOString(),
+    ventureIndex: Object.fromEntries(Object.entries(core?.ventureIndex || {}).map(([id, venture]) => [id, {
+      id: Number(venture?.id || id), jobs: Number(venture?.jobs), lvl: Number(venture?.lvl)
+    }])),
+    jobCategories: Object.fromEntries(Object.entries(core?.jobCategories || {}).map(([id, category]) => [id, {
+      id: Number(category?.id || id), name: String(category?.name || ''), jobs: Array.isArray(category?.jobs) ? category.jobs.map(Number) : []
+    }]))
+  });
+  const loadGarlandVentureCore = ({ force = false } = {}) => {
+    if (!force && garlandCoreCacheIsFresh(garlandVentureCoreCache)) {
+      const cacheAge = Date.now() - Date.parse(garlandVentureCoreCache.fetchedAt);
+      if (cacheAge > garlandVentureCoreCacheTtl / 2 && !garlandVentureCoreRequest) loadGarlandVentureCore({ force: true }).catch(() => {});
+      return Promise.resolve(garlandVentureCoreCache);
+    }
+    if (garlandVentureCoreRequest) return garlandVentureCoreRequest;
+    garlandVentureCoreRequest = fetch(garlandCoreSourceUrl, { cache: 'no-store' })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error(`Garland 核心资料返回 ${response.status}`)))
+      .then(core => {
+        const compact = compactGarlandVentureCore(core);
+        if (!Object.keys(compact.ventureIndex).length || !Object.keys(compact.jobCategories).length) throw new Error('Garland 核心资料缺少雇员职业索引');
+        garlandVentureCoreCache = compact;
+        save();
+        return compact;
+      })
+      .finally(() => { garlandVentureCoreRequest = null; });
+    return garlandVentureCoreRequest;
+  };
+  const garlandVentureCategories = (ventureId, core) => {
+    const venture = core?.ventureIndex?.[String(ventureId)];
+    const jobCategory = venture ? core?.jobCategories?.[String(venture.jobs)] : null;
+    if (!venture || !jobCategory) return { categories: [], evidence: null };
+    const jobs = new Set((jobCategory.jobs || []).map(Number));
+    const categories = [];
+    if (jobs.has(17)) categories.push('miner');
+    if (jobs.has(18)) categories.push('botanist');
+    if (/disciple(?:s)? of (?:war|magic)|war or magic/i.test(jobCategory.name || '')) categories.push('combat');
+    const resolved = sortTradeCategories(categories);
+    return {
+      categories: resolved,
+      evidence: resolved.length ? `Garland 雇员探险：${jobCategory.name || resolved.map(category => tradeCategoryLabels[category]).join('／')}（Lv.${venture.lvl || '—'}）` : null
+    };
+  };
+  // item 文档给出节点、怪物和雇员编号；雇员职业则由 Garland 核心资料的 ventureIndex / jobCategories 实时解析。
+  const garlandSourceCategories = (payload, core) => {
+    const item = payload?.item || {};
+    const categories = [];
+    const evidence = [];
+    if (Array.isArray(item.nodes) && item.nodes.length) {
+      if ([48, 54].includes(Number(item.category))) categories.push('miner');
+      if ([45, 50, 51].includes(Number(item.category))) categories.push('botanist');
+      evidence.push('采集节点');
+    }
+    if (Array.isArray(item.mobs) && item.mobs.length) { categories.push('combat'); evidence.push('怪物掉落'); }
+    (item.ventures || []).forEach(ventureId => {
+      const resolved = garlandVentureCategories(ventureId, core);
+      categories.push(...resolved.categories);
+      if (resolved.evidence) evidence.push(resolved.evidence);
+    });
+    return { categories: sortTradeCategories(categories), evidence };
+  };
+  const tradeSourceEvidence = (material, cached = null) => {
+    const source = materialSources[String(material?.uid || material?.itemId || '')] || {};
+    const verified = source?.verified?.evidence || [];
+    return [...new Set([...(cached?.evidence || []), ...verified])];
+  };
+  const tradeSourceResolution = material => {
+    if (!material) return { ready: false, categories: [], status: 'empty' };
+    if (isTradeCrystal(material)) return { ready: true, categories: ['crystal'], status: 'local' };
+    const uid = String(material.uid || material.itemId || '');
+    const staticCategories = staticTradeCategoryCandidates(material);
+    const cached = tradeSourceCache[uid];
+    // 已核验覆盖层可修正早期“无分类”缓存；缓存只能补充，不能覆盖资料包中的明确结论。
+    if (staticCategories.length) return { ready: true, categories: staticCategories, status: 'static', cached };
+    if (cached?.verified && cached.parserVersion === tradeSourceParserVersion) return { ready: true, categories: sortTradeCategories(cached.categories), status: 'cached', cached };
+    if (state.tradeSourceLoading.has(uid)) return { ready: false, categories: [], status: 'loading' };
+    if (state.tradeSourceFailures.has(uid)) return { ready: false, categories: [], status: 'failed' };
+    return { ready: false, categories: [], status: 'pending' };
+  };
+  const tradeCategoryCandidates = material => tradeSourceResolution(material).categories;
+  const fetchTradeSource = async (material, { refresh = true } = {}) => {
+    const uid = String(material?.uid || material?.itemId || '');
+    if (!/^\d+$/.test(uid) || isTradeCrystal(material) || state.tradeSourceLoading.has(uid)) return tradeSourceResolution(material);
+    state.tradeSourceLoading.add(uid);
+    state.tradeSourceFailures.delete(uid);
+    try {
+      const payload = await fetch(garlandItemSourceUrl(uid), { cache: 'no-store' })
+        .then(response => response.ok ? response.json() : Promise.reject(new Error(`Garland 返回 ${response.status}`)));
+      const garlandItem = payload?.item;
+      if (!garlandItem || Number(garlandItem.id) !== Number(uid)) throw new Error('Garland 未返回匹配的物品资料');
+      const core = Array.isArray(garlandItem.ventures) && garlandItem.ventures.length ? await loadGarlandVentureCore() : null;
+      const garlandSource = garlandSourceCategories(payload, core);
+      const categories = sortTradeCategories([...garlandSource.categories, ...staticTradeCategoryCandidates(material)]);
+      const icon = Number(garlandItem?.icon || 0);
+      if (icon > 0) {
+        garlandIconCache[uid] = icon;
+        localStorage.setItem(garlandIconCacheKey, JSON.stringify(garlandIconCache));
+      }
+      tradeSourceCache[uid] = {
+        itemId: uid,
+        name: material.n || material.name || garlandItem?.name || uid,
+        categories,
+        evidence: [...new Set([...garlandSource.evidence, ...tradeSourceEvidence(material)])],
+        sourceUrl: garlandItemSourceUrl(uid),
+        garlandUrl: garlandItemSourceUrl(uid),
+        queriedAt: new Date().toISOString(),
+        verified: true,
+        garlandVerified: true,
+        parserVersion: tradeSourceParserVersion
+      };
+      save();
+      return tradeSourceResolution(material);
+    } catch (error) {
+      state.tradeSourceFailures.set(uid, error?.message || '来源查询失败');
+      return tradeSourceResolution(material);
+    } finally {
+      state.tradeSourceLoading.delete(uid);
+      if (refresh && document.querySelector('#trade-listing-dialog[open] #trade-listing-item-id')?.value === uid) {
+        document.querySelector('#trade-listing-search')?.dispatchEvent(new Event('input'));
+      }
+    }
+  };
+  const tradeListingCategory = listing => {
+    if (tradeCategoryOrder.includes(listing?.category)) return listing.category;
+    const categories = tradeCategoryCandidates(tradeMaterial(listing?.itemId) || listing);
+    return categories.length === 1 ? categories[0] : 'other';
+  };
+  const tradeGroupSize = material => isTradeCrystal(material) || Number(material?.groupSize) === 9999 ? 9999 : 999;
+  const tradePriceMultiplier = material => isTradeCrystal(material) || Number(material?.groupSize) === 9999 ? 10000 : 1000;
+  const tradeTotal = listing => Number(listing.groups || 0) * tradePriceMultiplier(tradeMaterial(listing.itemId) || listing) * Number(listing.unitPrice || 0);
+  let activeTradePopover = null, tradePopoverHideTimer = null;
+  const tradeMarketPopoverContent = material => {
+    const listings = Array.isArray(material?.marketListings) ? material.marketListings : [];
+    const details = listings.length
+      ? `<div class="trade-market-listings">${listings.map(listing => `<div><span>[${listing.hq ? 'HQ' : 'NQ'}] ${money(listing.pricePerUnit)} × ${moneyFormatter.format(listing.quantity)} = ${money(listing.pricePerUnit * listing.quantity)}</span><small>${listing.retainerName || '匿名雇员'}${listing.worldName ? `（${listing.worldName}）` : ''}</small></div>`).join('')}</div>`
+      : `<p>${material?.marketStatus === 'no-listings' ? '当前没有 HQ／NQ 挂单。' : material?.marketStatus === 'stale' ? '市场刷新失败，暂无可展示的最近挂单。' : '尚未缓存挂单；请刷新市场参考。'}</p>`;
+    return `<b>中国区当前 HQ／NQ 挂单</b><em>${material?.u ? `刷新于 ${material.u}` : '未刷新'}</em>${details}`;
+  };
+  const hideTradeMarketPopover = (delayed = false) => {
+    clearTimeout(tradePopoverHideTimer);
+    const hide = () => { activeTradePopover = null; document.querySelector('#trade-market-popover').hidden = true; };
+    if (delayed) tradePopoverHideTimer = setTimeout(hide, 120); else hide();
+  };
+  const positionTradeMarketPopover = () => {
+    if (!activeTradePopover?.anchor?.isConnected) return hideTradeMarketPopover();
+    const popover = document.querySelector('#trade-market-popover'), rect = activeTradePopover.anchor.getBoundingClientRect();
+    const gap = 9, margin = 12, width = Math.min(470, window.innerWidth - margin * 2);
+    popover.style.width = width + 'px';
+    popover.style.left = Math.max(margin, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - margin)) + 'px';
+    popover.style.top = (rect.bottom + gap) + 'px';
+    const height = popover.getBoundingClientRect().height;
+    const top = rect.bottom + gap + height <= window.innerHeight - margin ? rect.bottom + gap : Math.max(margin, rect.top - height - gap);
+    popover.style.top = top + 'px';
+  };
+  const showTradeMarketPopover = (anchor, material) => {
+    clearTimeout(tradePopoverHideTimer);
+    const popover = document.querySelector('#trade-market-popover');
+    activeTradePopover = { anchor };
+    popover.innerHTML = tradeMarketPopoverContent(material);
+    popover.hidden = false;
+    positionTradeMarketPopover();
+  };
+  const tradeMarketReference = material => {
+    if (!material) return '未获取';
+    if (material.marketExcluded) return '不查询市场价';
+    return `<button type="button" class="trade-market-reference" data-trade-market-reference="${material.uid}">${Number(material.mp) > 0 ? money(marketComparisonCost(material.mp)) : marketPriceLabel(material)}</button>`;
+  };
+  const ensureTradeMaterial = candidate => {
+    const uid = String(candidate?.uid || '').trim();
+    if (!uid) return null;
+    let material = tradeMaterial(uid);
+    if (!material) {
+      material = { id: 'trade-' + uid, uid, n: String(candidate.n || uid), c: 0, mp: 0, u: '' };
+      data.m.push(material);
+    }
+    return material;
+  };
+  const renderTradeCategorySelect = (material, selectedCategory) => {
+    const select = document.querySelector('#trade-listing-category'), note = document.querySelector('#trade-listing-category-note');
+    const resolution = tradeSourceResolution(material);
+    const categories = resolution.categories;
+    const options = categories.length ? categories : resolution.ready ? ['other'] : [];
+    const value = options.includes(selectedCategory) ? selectedCategory : options[0];
+    select.innerHTML = options.map(category => `<option value="${category}">${tradeCategoryLabels[category]}</option>`).join('');
+    select.value = value;
+    select.disabled = !material || !resolution.ready || options.length <= 1;
+    const noteText = !material ? '选择材料后将实时查询 Garland Tools 的来源资料。'
+      : !resolution.ready && resolution.status === 'loading' ? '正在实时查询来源分类，请稍候…'
+      : !resolution.ready && resolution.status === 'failed' ? '来源查询失败，请重试后再保存；为避免误分类，不能暂归“其他”。'
+      : categories.length > 1 ? '该材料有多种已核验来源，请选择本条库存的归类。'
+      : categories.length ? `已按${resolution.status === 'static' ? 'Garland 已核验' : 'Garland 实时核验'}来源归为“${tradeCategoryLabels[value]}”。`
+      : '实时核验未发现园艺、采矿或战职来源，已归入“其他”。';
+    note.textContent = noteText;
+  };
+  function openTradeListingDialog(listing = null) {
+    state.tradeEditingId = listing?.id || null;
+    state.tradeSearch = '';
+    const material = listing ? tradeMaterial(listing.itemId) : null;
+    document.querySelector('#trade-listing-title').textContent = listing ? '编辑本机库存材料' : '添加本机库存材料';
+    document.querySelector('#trade-listing-item-id').value = listing?.itemId || '';
+    document.querySelector('#trade-listing-item-name').value = listing?.name || material?.n || '';
+    document.querySelector('#trade-listing-search').value = listing?.name || material?.n || '';
+    document.querySelector('#trade-listing-groups').value = listing?.groups || 1;
+    document.querySelector('#trade-listing-unit-price').value = listing?.unitPrice || '';
+    document.querySelector('#trade-listing-error').hidden = true;
+    const refresh = () => {
+      const selectedId = document.querySelector('#trade-listing-item-id').value;
+      const selected = tradeMaterial(selectedId);
+      const groups = Number(document.querySelector('#trade-listing-groups').value || 0), unitPrice = Number(document.querySelector('#trade-listing-unit-price').value || 0);
+      const multiplier = tradePriceMultiplier(selected);
+      document.querySelector('#trade-listing-total').textContent = money(groups * multiplier * unitPrice);
+      document.querySelector('#trade-listing-total-formula').textContent = `组数 × ${multiplier} × 单价`;
+      document.querySelector('#trade-listing-selected').innerHTML = selected ? `${itemLabelMarkup(selected.uid, selected.n)}<span>${tradeGroupSize(selected)} 个 / 组</span>` : '请先从搜索结果中选择材料。';
+      document.querySelector('#trade-listing-market-reference').textContent = selected ? `市场参考价（单价）：${marketPriceLabel(selected)}` : '市场参考价：请先选择材料。';
+      renderTradeCategorySelect(selected, document.querySelector('#trade-listing-category').value || listing?.category);
+      const query = state.tradeSearch.trim();
+      const results = query ? otherSearchResults(query).slice(0, 20) : [];
+      document.querySelector('#trade-listing-results').innerHTML = results.length ? results.map(item => `<button type="button" class="trade-search-result" data-trade-select="${item.uid}">${itemLabelMarkup(item.uid, item.n)}<small>ID ${item.uid}</small></button>`).join('') : query ? '<div class="meta">未找到匹配材料；道具索引加载后请重试。</div>' : '';
+      document.querySelectorAll('[data-trade-select]').forEach(button => button.onclick = () => {
+        const chosen = otherSearchResults(state.tradeSearch).find(item => String(item.uid) === button.dataset.tradeSelect);
+        const selectedMaterial = ensureTradeMaterial(chosen);
+        if (!selectedMaterial) return;
+        document.querySelector('#trade-listing-item-id').value = selectedMaterial.uid;
+        document.querySelector('#trade-listing-item-name').value = selectedMaterial.n;
+        document.querySelector('#trade-listing-search').value = selectedMaterial.n;
+        state.tradeSearch = '';
+        fetchGarlandIcon(selectedMaterial.uid);
+        refresh();
+        fetchTradeSource(selectedMaterial);
+      });
+    };
+    document.querySelector('#trade-listing-search').oninput = event => { state.tradeSearch = event.target.value; refresh(); };
+    document.querySelector('#trade-listing-groups').oninput = refresh;
+    document.querySelector('#trade-listing-unit-price').oninput = refresh;
+    loadItemIndex(); loadItemIconIndex(); refresh();
+    if (material) fetchTradeSource(material);
+    document.querySelector('#trade-listing-dialog').showModal();
+  }
+  const hideTradeContextMenu = () => {
+    const menu = document.querySelector('#trade-context-menu');
+    menu.hidden = true;
+    menu.innerHTML = '';
+  };
+  const showTradeContextMenu = (event, listing, mode) => {
+    event.preventDefault();
+    const menu = document.querySelector('#trade-context-menu');
+    menu.innerHTML = mode === 'quantity'
+      ? `<button type="button" data-trade-context-quantity="${listing.id}">修改组数</button>`
+      : mode === 'unit-price'
+        ? `<button type="button" data-trade-context-unit-price="${listing.id}">修改单价</button>`
+      : `<button type="button" data-trade-context-edit="${listing.id}">编辑材料</button><button type="button" class="danger" data-trade-context-delete="${listing.id}">删除材料</button>`;
+    const margin = 8, width = 142;
+    menu.style.left = Math.min(event.clientX, window.innerWidth - width - margin) + 'px';
+    menu.style.top = Math.min(event.clientY, window.innerHeight - 100 - margin) + 'px';
+    menu.hidden = false;
+    menu.querySelector('[data-trade-context-quantity]')?.addEventListener('click', () => openTradeQuantityDialog(listing));
+    menu.querySelector('[data-trade-context-unit-price]')?.addEventListener('click', () => openTradeUnitPriceDialog(listing));
+    menu.querySelector('[data-trade-context-edit]')?.addEventListener('click', () => openTradeListingDialog(listing));
+    menu.querySelector('[data-trade-context-delete]')?.addEventListener('click', () => {
+      const index = tradeInventory.findIndex(entry => entry.id === listing.id);
+      if (index >= 0 && confirm('删除这条本机库存材料？')) { tradeInventory.splice(index, 1); save(); renderTrade(); }
+    });
+  };
+  function openTradeQuantityDialog(listing) {
+    hideTradeContextMenu();
+    const material = tradeMaterial(listing.itemId) || listing;
+    document.querySelector('#trade-quantity-id').value = listing.id;
+    document.querySelector('#trade-quantity-groups').value = listing.groups;
+    document.querySelector('#trade-quantity-material').textContent = `${tradeDisplayName(material)} · ${tradeGroupSize(material)} 个 / 组`;
+    document.querySelector('#trade-quantity-error').hidden = true;
+    document.querySelector('#trade-quantity-dialog').showModal();
+  }
+  function openTradeUnitPriceDialog(listing) {
+    hideTradeContextMenu();
+    const material = tradeMaterial(listing.itemId) || listing;
+    document.querySelector('#trade-unit-price-id').value = listing.id;
+    document.querySelector('#trade-unit-price-value').value = listing.unitPrice;
+    document.querySelector('#trade-unit-price-material').textContent = `${tradeDisplayName(material)} · 当前合价 ${money(tradeTotal(listing))}`;
+    document.querySelector('#trade-unit-price-error').hidden = true;
+    document.querySelector('#trade-unit-price-dialog').showModal();
+  }
+  const revalidateTradeInventorySources = () => {
+    const targets = tradeInventory.filter(listing => {
+      const uid = String(listing.itemId || '');
+      return /^\d+$/.test(uid) && !isTradeCrystal(tradeMaterial(uid) || listing) && !state.tradeSourceAudited.has(uid);
+    });
+    if (!targets.length) return;
+    targets.forEach(listing => state.tradeSourceAudited.add(String(listing.itemId)));
+    Promise.all(targets.map(async listing => {
+      const material = tradeMaterial(listing.itemId) || listing;
+      const resolution = await fetchTradeSource(material, { refresh: false });
+      if (listing.categoryOrigin === 'manual' || resolution.categories.length !== 1) return false;
+      const category = resolution.categories[0];
+      if (listing.category === category && listing.categoryOrigin === 'auto') return false;
+      listing.category = category;
+      listing.categoryOrigin = 'auto';
+      listing.updatedAt = new Date().toLocaleString('zh-CN');
+      return true;
+    })).then(changed => {
+      if (!changed.some(Boolean)) return;
+      save();
+      if (state.page === 'trade' && state.tradeView === 'inventory') renderTrade();
+    });
+  };
+  function renderTrade() {
+    if (activeTradePopover) hideTradeMarketPopover();
+    const root = document.querySelector('#trade');
+    const categories = tradeCategoryOrder.filter(category => tradeInventory.some(listing => tradeListingCategory(listing) === category));
+    const categorySections = categories.map(category => {
+      const rows = tradeInventory.filter(listing => tradeListingCategory(listing) === category).sort((left, right) => Number(left.itemId) - Number(right.itemId));
+      return `<section class="trade-category-section"><h2>${tradeCategoryLabels[category]}</h2><div class="table-wrap"><table class="ledger trade-ledger"><colgroup><col class="trade-col-material"><col class="trade-col-unit"><col class="trade-col-groups"><col class="trade-col-total"><col class="trade-col-market"></colgroup><thead><tr><th>材料</th><th>单价</th><th>库存组数</th><th>合价</th><th>市场参考价</th></tr></thead><tbody>${rows.map(listing => { const material = tradeMaterial(listing.itemId) || { uid: listing.itemId, n: listing.name || listing.itemId, groupSize: listing.groupSize }; return `<tr><td class="label"><span class="trade-context-target" tabindex="0" data-trade-name-context="${listing.id}">${itemLabelMarkup(material.uid, material.n)}</span></td><td><span class="trade-context-target" tabindex="0" data-trade-unit-price-context="${listing.id}">${money(listing.unitPrice)}</span></td><td><span class="trade-context-target" tabindex="0" data-trade-quantity-context="${listing.id}">${Number(listing.groups)} 组</span></td><td class="price">${money(tradeTotal(listing))}</td><td>${tradeMarketReference(material)}</td></tr>`; }).join('')}</tbody></table></div></section>`;
+    }).join('');
+    const inventoryContent = `<div class="header"><div><div class="meta">交易市场 · 本机数据</div><h1>我的库存材料</h1><div class="sub">独立的待售材料清单，不会影响采购、制作或潜水艇库存。普通材料 999 个 / 组，水晶 9999 个 / 组；普通材料合价按组数 × 1000 × 单价，水晶按组数 × 10000 × 单价计算。右键材料名称可编辑或删除，右键库存组数可修改数量，右键单价可修改报价。</div></div><div class="trade-actions"><button id="trade-refresh-market" class="btn secondary" ${state.marketRefreshing ? 'disabled' : ''}>${state.marketRefreshing ? '正在刷新…' : '刷新市场参考'}</button><button id="trade-add-listing" class="btn">+ 添加材料</button></div></div>${categorySections ? `<div class="trade-category-sections">${categorySections}</div>` : '<div class="empty trade-empty">尚未添加本机库存材料；添加后会显示对应来源分类。</div>'}`;
+    const recruitmentContent = `<div class="trade-unavailable"><div class="meta">交易市场 · 招募市场</div><h1>招募市场准备中</h1><p>当前版本仅保存你的本机待售材料，不会上传任何库存、采购、成本或销售数据。</p><p>开放前将接入账号、公开上架、服务器筛选、分页浏览、下架与举报机制；届时仅同步你主动公开的材料报价。</p></div>`;
+    root.innerHTML = state.tradeView === 'inventory' ? inventoryContent : recruitmentContent;
+    root.querySelector('#trade-add-listing')?.addEventListener('click', () => openTradeListingDialog());
+    root.querySelector('#trade-refresh-market')?.addEventListener('click', () => refreshMarket(true, tradeInventory.map(listing => tradeMaterial(listing.itemId)).filter(Boolean)));
+    root.querySelectorAll('[data-trade-name-context]').forEach(target => {
+      const listing = tradeInventory.find(entry => entry.id === target.dataset.tradeNameContext);
+      target.oncontextmenu = event => listing && showTradeContextMenu(event, listing, 'name');
+    });
+    root.querySelectorAll('[data-trade-quantity-context]').forEach(target => {
+      const listing = tradeInventory.find(entry => entry.id === target.dataset.tradeQuantityContext);
+      target.oncontextmenu = event => listing && showTradeContextMenu(event, listing, 'quantity');
+    });
+    root.querySelectorAll('[data-trade-unit-price-context]').forEach(target => {
+      const listing = tradeInventory.find(entry => entry.id === target.dataset.tradeUnitPriceContext);
+      target.oncontextmenu = event => listing && showTradeContextMenu(event, listing, 'unit-price');
+    });
+    root.querySelectorAll('[data-trade-market-reference]').forEach(button => {
+      const material = tradeMaterial(button.dataset.tradeMarketReference);
+      button.addEventListener('mouseenter', () => showTradeMarketPopover(button, material));
+      button.addEventListener('mouseleave', () => hideTradeMarketPopover(true));
+      button.addEventListener('focus', () => showTradeMarketPopover(button, material));
+      button.addEventListener('blur', () => hideTradeMarketPopover());
+    });
+    if (state.tradeView === 'inventory') revalidateTradeInventorySources();
+  }
+  const leveRouteRows = () => (levequests.routes || []).filter(row => row.job === state.leveJob && Number(row.level) >= Number(state.leveStart) && Number(row.level) < Number(state.leveTarget));
+  const leveExperiencePlan = (routes, start, target, multiplier) => {
+    const levelExperience = levequests.levelExperience || [];
+    const requiredExperience = levelExperience.slice(start, target).reduce((sum, value) => sum + Number(value || 0), 0);
+    let currentLevel = start, currentLevelExperience = 0, plannedExperience = 0;
+    const advanceLevel = experience => {
+      let remaining = Number(experience || 0);
+      while (remaining > 0 && currentLevel < target) {
+        const needed = Math.max(0, Number(levelExperience[currentLevel] || 0) - currentLevelExperience);
+        if (!(needed > 0)) { currentLevel += 1; currentLevelExperience = 0; continue; }
+        const used = Math.min(remaining, needed);
+        currentLevelExperience += used;
+        remaining -= used;
+        if (currentLevelExperience >= needed) { currentLevel += 1; currentLevelExperience = 0; }
+      }
+    };
+    // 7.0 规则：80 级以下理符始终按原经验计算；角色达到 90 级后，90 以下理符不再提供经验。
+    const routeHasExperienceAtLevel = row => currentLevel < 90 || Number(row.level) >= 90;
+    const rows = routes.map(row => {
+      const originalAllowances = Math.max(0, Number(row.routeAllowances || 0));
+      const submissions = Math.max(1, Number(row.submissionsPerAllowance || 1));
+      const experiencePerSubmission = Math.max(0, Number(row.experiencePerSubmission || 0));
+      const experiencePerAllowance = experiencePerSubmission * submissions * multiplier;
+      let allowances = 0, blockedAtLevel = null;
+      while (allowances < originalAllowances && plannedExperience < requiredExperience) {
+        if (!(experiencePerAllowance > 0)) break;
+        if (!routeHasExperienceAtLevel(row)) { blockedAtLevel = currentLevel; break; }
+        allowances += 1;
+        plannedExperience += experiencePerAllowance;
+        advanceLevel(experiencePerAllowance);
+      }
+      return {
+        ...row,
+        originalAllowances,
+        submissions,
+        experiencePerSubmission,
+        experiencePerAllowance,
+        plannedAllowances: allowances,
+        plannedQuantity: allowances * submissions,
+        plannedExperience: allowances * experiencePerAllowance,
+        blockedAtLevel
+      };
+    });
+    return {
+      rows,
+      requiredExperience,
+      plannedExperience,
+      overflowExperience: Math.max(0, plannedExperience - requiredExperience),
+      shortfallExperience: Math.max(0, requiredExperience - plannedExperience),
+      endingLevel: currentLevel
+    };
+  };
+  function renderLeve() {
+    loadItemIconIndex();
+    const start = Number(state.leveStart), target = Number(state.leveTarget);
+    const validRange = Number.isInteger(start) && Number.isInteger(target) && start >= 1 && target <= 100 && target > start;
+    const routes = validRange ? leveRouteRows() : [];
+    const serverMultiplier = state.leveDouble ? 2 : 1, hqMultiplier = 2, multiplier = hqMultiplier * serverMultiplier;
+    const plan = validRange ? leveExperiencePlan(routes, start, target, multiplier) : { rows: [], requiredExperience: 0, plannedExperience: 0, overflowExperience: 0, shortfallExperience: 0, endingLevel: start };
+    const summary = plan.rows.reduce((total, row) => {
+      const cost = leveRecipeCost(row), quantity = Number(row.plannedQuantity || 0);
+      total.allowances += Number(row.plannedAllowances || 0);
+      total.quantity += quantity;
+      if (quantity > 0 && Number(cost.unit) > 0) total.cost += cost.unit * quantity;
+      else if (quantity > 0) total.pending += 1;
+      if (!(Number(row.experiencePerSubmission) > 0)) total.unverified += 1;
+      return total;
+    }, { allowances: 0, quantity: 0, cost: 0, pending: 0, unverified: 0 });
+    const rows = plan.rows.map((row, index) => {
+      const material = leveKnownMaterial(row), cost = leveRecipeCost(row), submissions = Number(row.submissions || 1), xp = Number(row.experiencePerSubmission || 0);
+      const allowances = Number(row.plannedAllowances || 0), originalAllowances = Number(row.originalAllowances || 0);
+      const factors = [moneyFormatter.format(xp), submissions, allowances, 'HQ 2', ...(state.leveDouble ? ['服务器 2'] : [])];
+      const experience = !(xp > 0)
+        ? '等待任务匹配'
+        : row.blockedAtLevel != null && allowances === 0
+          ? `当前模拟等级 ${row.blockedAtLevel}：任务等级 ${row.level} 无经验`
+          : allowances > 0
+            ? `${factors.join(' × ')} = ${moneyFormatter.format(row.plannedExperience)}`
+            : '目标经验已满足，无需提交';
+      const sources = row.garlandUrl ? `<a href="${row.garlandUrl}" target="_blank" rel="noreferrer">Garland 已核验</a>${row.wikiUrl ? ` · <a href="${row.wikiUrl}" target="_blank" rel="noreferrer">Wiki 对照</a>` : ''}` : (row.verificationStatus === 'wiki-manual-verified' && row.wikiUrl ? `<a href="${row.wikiUrl}" target="_blank" rel="noreferrer">Wiki 已核验</a>` : (row.wikiUrl ? `<a href="${row.wikiUrl}" target="_blank" rel="noreferrer">Wiki 待对照</a>` : '待处理'));
+      const itemLabel = material ? itemLabelMarkup(material.uid, row.item, { hq: true }) : `${row.item} <span class="meta">（待核验物品 ID）</span>`;
+      const costLabel = allowances > 0
+        ? cost.unit > 0 ? `${money(cost.unit)}<br><b>${money(cost.unit * Number(row.plannedQuantity))}</b><br><small>按计划交付数</small>` : cost.reason
+        : '—';
+      return `<tr><td>${index + 1}</td><td>${row.level}</td><td class="label">${material ? `<button class="bundle-link" data-leve-detail="${material.uid}">${itemLabel}</button>` : itemLabel}</td><td>计划 ${row.plannedQuantity} 个 / ${Number(row.routeQuantity || 0)} 个<br><small>${allowances} / ${originalAllowances} 额度 · ${submissions} 次 / 额度 · HQ 交付</small></td><td>${experience}${row.blockedAtLevel != null && allowances > 0 ? `<br><small>到达 ${row.blockedAtLevel} 级后，剩余额度无经验</small>` : ''}</td><td>${costLabel}</td><td class="label">${row.quest}<br><small>${row.place || '待补充地点'}${row.note ? ` · ${row.note}` : ''}</small><br><small>${sources}</small></td></tr>`;
+    }).join('');
+    const root = document.querySelector('#leve');
+    const experienceStatus = plan.shortfallExperience > 0
+      ? `额度不足 ${moneyFormatter.format(plan.shortfallExperience)} 经验`
+      : plan.overflowExperience > 0 ? `预计溢出 ${moneyFormatter.format(plan.overflowExperience)} 经验` : '刚好满足目标经验';
+    root.innerHTML = `<div class="header"><div><div class="meta">理符售卖 · 生产职业升级规划</div><h1>理符升级推荐</h1><div class="sub">路线按《联合商城》顺序逐额度规划；成本直接使用材料库的最新参考价，全部按高品质交付计算。80 级以下理符始终按原经验计算；达到 90 级后，90 以下理符不再计入经验。</div></div></div><section class="leve-controls"><label>职业<select id="leve-job">${(levequests.jobs || []).map(job => `<option value="${job}" ${job === state.leveJob ? 'selected' : ''}>${job}</option>`).join('')}</select></label><label>当前等级<input id="leve-start" type="number" min="1" max="99" step="1" value="${start}"></label><label>目标等级<input id="leve-target" type="number" min="2" max="100" step="1" value="${target}"></label><label class="leve-double"><input id="leve-double" type="checkbox" ${state.leveDouble ? 'checked' : ''}>服务器双倍经验</label></section>${validRange ? '' : '<p class="status">目标等级必须大于当前等级，且范围为 1–100 级。</p>'}<div class="cards leve-summary"><article class="card"><small>升级所需经验</small><b>${moneyFormatter.format(plan.requiredExperience)}</b><div class="meta">${start} → ${target} 级</div></article><article class="card"><small>计划理符额度</small><b>${summary.allowances}</b><div class="meta">按经验自动收缩</div></article><article class="card"><small>计划交付物总数</small><b>${summary.quantity}</b></article><article class="card"><small>计划获得经验</small><b>${moneyFormatter.format(plan.plannedExperience)}</b><div class="meta">${experienceStatus} · HQ ×2${state.leveDouble ? ' · 服务器 ×2' : ''}${summary.unverified ? ` · ${summary.unverified} 项等待核验` : ''}</div></article><article class="card"><small>预计交付成本</small><b>${summary.pending ? '等待补价' : money(summary.cost)}</b><div class="meta">${summary.pending ? `${summary.pending} 项等待补价，未计入总计` : '按计划交付数递归计算'}</div></article></div><div class="table-wrap"><table class="ledger leve-ledger"><thead><tr><th>顺序</th><th>等级</th><th>交付物</th><th>计划数量 / 理符额度</th><th>经验</th><th>当前成本</th><th>理符任务与地点</th></tr></thead><tbody>${rows || `<tr><td colspan="7" class="empty">${validRange ? '该等级范围暂无已导入路线。' : '请先填写有效等级范围。'}</td></tr>`}</tbody></table></div>`;
+    root.querySelectorAll('#leve-job,#leve-start,#leve-target,#leve-double').forEach(input => input.onchange = () => {
+      state.leveJob = root.querySelector('#leve-job').value; state.leveStart = Number(root.querySelector('#leve-start').value || 0); state.leveTarget = Number(root.querySelector('#leve-target').value || 0); state.leveDouble = root.querySelector('#leve-double').checked; renderLeve();
+    });
+    root.querySelectorAll('[data-leve-detail]').forEach(button => button.onclick = () => openLeveRecipeReference(button.dataset.leveDetail, true));
   }
   function renderSubmarineSummary() {
     {
@@ -2337,11 +3467,12 @@ window.addEventListener('load', async () => {
   const materialUnitPrice = material => {
     if (!material) return 0;
     const direct = directSourceChoice(material);
-    return direct.price || material.mp || 0;
+    return direct.price || marketComparisonCost(material.mp) || 0;
   };
   const costTable = (rows, totalLabel, total, options = {}) => {
-    const priced = rows.map(entry => {
-      const choice = options.submarine ? (entry.sourceChoice || submarineSourceChoice(data.m.find(material => String(material.uid) === String(entry.uid)) || { uid: String(entry.uid) })) : null;
+    const withTimeCost = rows;
+    const priced = withTimeCost.map(entry => {
+      const choice = entry.timeSurcharge ? null : (options.submarine ? (entry.sourceChoice || submarineSourceChoice(data.m.find(material => String(material.uid) === String(entry.uid)) || { uid: String(entry.uid) })) : null);
       return { ...entry, missing: !entry.cost && entry.quantity > 0, npc: choice?.key === 'npc' ? npcMaterial(entry.uid) : undefined, sourceChoice: choice };
     });
     // 金币显示按整数取整。完整展示时将舍入尾差附加到最后一行，保证用户看到的行合价之和等于表尾总价。
@@ -2361,11 +3492,11 @@ window.addEventListener('load', async () => {
     const marketHeader = sourceSections && priced.some(entry => entry.pinnedMarket) ? '<tr class="detail-section market-section"><td colspan="4">市场采购材料</td></tr>' : '';
     const regularHeader = sourceSections && priced.some(entry => !entry.pinnedNpc && !entry.pinnedExchange && !entry.pinnedMarket) ? '<tr class="detail-section"><td colspan="4">其余材料</td></tr>' : '';
     const rowHtml = entry => {
-      const hasRecipe = Boolean(submarineRawRecipe(entry.uid));
+      const hasRecipe = !entry.timeSurcharge && Boolean(submarineRawRecipe(entry.uid));
       const isTerminal = entry.sourceChoice?.key && entry.sourceChoice.key !== 'craft' && entry.sourceChoice.key !== 'pending';
       const sourceTag = options.submarine && (entry.sourceChoice?.key === 'npc' || isExchangeChoice(entry.sourceChoice) || (hasRecipe && isTerminal)) ? recommendationTag(entry.sourceChoice) : '';
       const canOpenDetail = options.submarine && Boolean(sourceTag);
-      const label = itemLabelMarkup(entry.uid, entry.name);
+      const label = entry.timeSurcharge ? `<span class="item-label"><span>${entry.name}</span></span>` : itemLabelMarkup(entry.uid, entry.name);
       const name = canOpenDetail ? `<button class="submarine-material-link" data-submarine-material-detail="${entry.uid}">${label}</button>` : label;
       return `<tr class="${entry.npc ? 'npc-row' : ''}"><td class="label">${sourceTag}${name}</td><td>${entry.quantity}</td><td>${entry.missing ? '未获取' : money(entry.unit)}</td><td>${entry.missing ? '—' : money(entry.displayCost)}</td></tr>`;
     };
@@ -2385,7 +3516,8 @@ window.addEventListener('load', async () => {
     document.querySelector('#bundle-detail-title').textContent = `${bundle.label}装备详情`;
     const incomplete = bundle.components.filter(component => component.item && !hasCompleteBaseRecipe(component.item)).map(component => component.item.n);
     const missingPrices = plan.missing;
-    document.querySelector('#bundle-detail-content').innerHTML = `${incomplete.length ? `<div class="status">基础配方不完整：${incomplete.join('、')}。该套装不可制作入账。</div>` : ''}${missingPrices.length ? `<div class="status">以下基础素材未获取单价：${missingPrices.join('、')}。请刷新市场价或添加采购记录后再制作。</div>` : ''}<div class="detail-columns"><section class="detail-column"><h3>成品清单</h3>${costTable(plan.finished, '成品清单总成本', plan.total)}</section><section class="detail-column"><h3>制作素材：直接</h3>${costTable(plan.direct, '直接素材总成本', plan.total)}</section><section class="detail-column"><h3>制作素材：基础</h3>${costTable(plan.basic, '基础素材总成本', plan.total)}</section></div><section class="sales-history"><div class="history-head"><div><h3>历史销售记录</h3><div class="sub">新增与删除记录都会同步回写该职业 / 分项的成品库存。</div></div></div><form id="detail-sale-form" class="history-form"><label>销售日期<input id="detail-sale-date" type="date" value="${today()}"></label><label>数量<input id="detail-sale-quantity" type="number" min="1" max="${inventory(bundle)}" value="1"></label><label>成交单价<input id="detail-sale-price" type="number" min="0.01" step="1" placeholder="建议售价 ${Math.round(priceFor(bundle))} G" required></label><button class="btn" ${inventory(bundle) ? '' : 'disabled'}>+ 新增销售记录</button></form><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>日期</th><th>数量</th><th>成交额</th><th>销售成本</th><th>利润</th><th></th></tr></thead><tbody>${history.map(({ entry, index }) => `<tr><td>${entry.date}</td><td>${entry.q}</td><td>${money(entry.amount)}</td><td>${money(entry.cost)}</td><td class="profit">${money(entry.profit)}</td><td><button class="btn secondary" data-delete-sale="${index}">删除</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">暂无销售记录</td></tr>'}</tbody></table></div></section>`;
+    const costOptions = { timeCost: plan.timeCost, craftedOutputs: plan.craftedOutputs };
+    document.querySelector('#bundle-detail-content').innerHTML = `${incomplete.length ? `<div class="status">基础配方不完整：${incomplete.join('、')}。该套装不可制作入账。</div>` : ''}${missingPrices.length ? `<div class="status">以下基础素材未获取单价：${missingPrices.join('、')}。请刷新市场价或添加采购记录后再制作。</div>` : ''}<div class="detail-columns"><section class="detail-column"><h3>成品清单</h3>${costTable(plan.finished, '成品清单总成本', plan.total, costOptions)}</section><section class="detail-column"><h3>制作素材：直接</h3>${costTable(plan.direct, '直接素材总成本', plan.total, costOptions)}</section><section class="detail-column"><h3>制作素材：基础</h3>${costTable(plan.basic, '基础素材总成本', plan.basicTotal, { ...costOptions, reconcile: false })}</section></div><section class="sales-history"><div class="history-head"><div><h3>历史销售记录</h3><div class="sub">新增与删除记录都会同步回写该职业 / 分项的成品库存。</div></div></div><form id="detail-sale-form" class="history-form"><label>销售日期<input id="detail-sale-date" type="date" value="${today()}"></label><label>数量<input id="detail-sale-quantity" type="number" min="1" max="${inventory(bundle)}" value="1"></label><label>成交单价<input id="detail-sale-price" type="number" min="0.01" step="1" placeholder="建议售价 ${Math.round(priceFor(bundle))} G" required></label><button class="btn" ${inventory(bundle) ? '' : 'disabled'}>+ 新增销售记录</button></form><div class="table-wrap history-table"><table class="ledger"><thead><tr><th>日期</th><th>数量</th><th>成交额</th><th>销售成本</th><th>利润</th><th></th></tr></thead><tbody>${history.map(({ entry, index }) => `<tr><td>${entry.date}</td><td>${entry.q}</td><td>${money(entry.amount)}</td><td>${money(entry.cost)}</td><td class="profit">${money(entry.profit)}</td><td><button class="btn secondary" data-delete-sale="${index}">删除</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">暂无销售记录</td></tr>'}</tbody></table></div></section>`;
     document.querySelector('#detail-sale-form').onsubmit = event => {
       event.preventDefault();
       try {
@@ -2551,6 +3683,57 @@ window.addEventListener('load', async () => {
     prices[state.editingPriceKey] = Math.max(0, Number(document.querySelector('#single-price-value').value || 0));
     save(); document.querySelector('#single-price-dialog').close();
     if (state.page === 'submarine') renderSubmarine(); else renderEquipment();
+  };
+  document.querySelector('#trade-listing-form').onsubmit = async event => {
+    event.preventDefault();
+    const itemId = document.querySelector('#trade-listing-item-id').value, groups = Number(document.querySelector('#trade-listing-groups').value || 0), unitPrice = Number(document.querySelector('#trade-listing-unit-price').value || 0), category = document.querySelector('#trade-listing-category').value, error = document.querySelector('#trade-listing-error');
+    const fail = (message, input) => { error.textContent = message; error.hidden = false; input?.focus(); };
+    const material = tradeMaterial(itemId);
+    if (!material) return fail('请先从搜索结果中选择材料。', document.querySelector('#trade-listing-search'));
+    if (!(groups > 0) || !Number.isInteger(groups)) return fail('组数必须是大于 0 的整数。', document.querySelector('#trade-listing-groups'));
+    if (!(unitPrice > 0)) return fail('请填写大于 0 的单价。', document.querySelector('#trade-listing-unit-price'));
+    const sourceResolution = tradeSourceResolution(material);
+    if (!sourceResolution.ready) return fail('来源查询失败或仍在进行中，请重试后再保存。', document.querySelector('#trade-listing-search'));
+    const categoryOptions = sourceResolution.categories;
+    if (!tradeCategoryOrder.includes(category) || (categoryOptions.length && !categoryOptions.includes(category))) return fail('请选择有效的来源分类。', document.querySelector('#trade-listing-category'));
+    const timestamp = new Date().toLocaleString('zh-CN');
+    const entry = { id: state.tradeEditingId || 'trade-' + Date.now() + '-' + Math.random().toString(16).slice(2), itemId: String(material.uid), name: material.n, category: category || 'other', categoryOrigin: categoryOptions.length > 1 ? 'manual' : 'auto', groups, groupSize: tradeGroupSize(material), unitPrice, total: groups * tradePriceMultiplier(material) * unitPrice, createdAt: state.tradeEditingId ? (tradeInventory.find(row => row.id === state.tradeEditingId)?.createdAt || timestamp) : timestamp, updatedAt: timestamp, visibility: 'local', remoteId: null, syncStatus: 'local' };
+    const index = tradeInventory.findIndex(row => row.id === state.tradeEditingId);
+    if (index >= 0) tradeInventory[index] = entry;
+    else tradeInventory.unshift(entry);
+    save();
+    document.querySelector('#trade-listing-dialog').close();
+    state.tradeEditingId = null;
+    renderTrade();
+    await refreshMarket(false, [material]);
+  };
+  document.querySelector('#trade-quantity-form').onsubmit = event => {
+    event.preventDefault();
+    const id = document.querySelector('#trade-quantity-id').value, groups = Number(document.querySelector('#trade-quantity-groups').value || 0), error = document.querySelector('#trade-quantity-error');
+    const listing = tradeInventory.find(entry => entry.id === id);
+    if (!listing) { error.textContent = '未找到该库存材料，请关闭后重试。'; error.hidden = false; return; }
+    if (!(groups > 0) || !Number.isInteger(groups)) { error.textContent = '组数必须是大于 0 的整数。'; error.hidden = false; document.querySelector('#trade-quantity-groups').focus(); return; }
+    const material = tradeMaterial(listing.itemId) || listing;
+    listing.groups = groups;
+    listing.groupSize = tradeGroupSize(material);
+    listing.total = tradeTotal(listing);
+    listing.updatedAt = new Date().toLocaleString('zh-CN');
+    save();
+    document.querySelector('#trade-quantity-dialog').close();
+    renderTrade();
+  };
+  document.querySelector('#trade-unit-price-form').onsubmit = event => {
+    event.preventDefault();
+    const id = document.querySelector('#trade-unit-price-id').value, unitPrice = Number(document.querySelector('#trade-unit-price-value').value || 0), error = document.querySelector('#trade-unit-price-error');
+    const listing = tradeInventory.find(entry => entry.id === id);
+    if (!listing) { error.textContent = '未找到该库存材料，请关闭后重试。'; error.hidden = false; return; }
+    if (!(unitPrice > 0)) { error.textContent = '单价必须大于 0。'; error.hidden = false; document.querySelector('#trade-unit-price-value').focus(); return; }
+    listing.unitPrice = unitPrice;
+    listing.total = tradeTotal(listing);
+    listing.updatedAt = new Date().toLocaleString('zh-CN');
+    save();
+    document.querySelector('#trade-unit-price-dialog').close();
+    renderTrade();
   };
   document.querySelector('#submarine-sale-form').onsubmit = event => {
     event.preventDefault();
@@ -2832,14 +4015,20 @@ window.addEventListener('load', async () => {
   });
   document.querySelector('#submarine-toggle').onclick = () => { state.page = 'submarine'; state.submarineView = 'summary'; state.submarineExpanded = true; state.expanded = false; state.guideExpanded = false; render(); };
   document.querySelectorAll('[data-submarine-view]').forEach(button => button.onclick = () => { state.page = 'submarine'; state.submarineView = button.dataset.submarineView; state.submarineExpanded = true; state.expanded = false; state.guideExpanded = false; render(); });
-  document.querySelector('#guide-toggle').onclick = () => { state.page = 'guide'; state.guideView = 'crystals'; state.selectedMaterial = null; state.guideExpanded = true; state.expanded = false; state.submarineExpanded = false; render(); };
-  document.querySelectorAll('[data-guide]').forEach(button => button.onclick = () => {
-    state.page = 'guide'; state.guideView = button.dataset.guide; state.selectedMaterial = null; state.guideExpanded = true; state.expanded = false; state.submarineExpanded = false; render();
-  });
+  document.querySelector('.app-primary-nav button[data-page="leve"]').onclick = () => { state.page = 'leve'; state.expanded = false; state.submarineExpanded = false; state.guideExpanded = false; render(); };
+  document.querySelector('.app-primary-nav button[data-page="trade"]').onclick = () => { state.page = 'trade'; state.tradeView = 'inventory'; state.expanded = false; state.submarineExpanded = false; state.guideExpanded = false; render(); };
+  document.querySelectorAll('[data-trade-view]').forEach(button => button.onclick = () => { state.page = 'trade'; state.tradeView = button.dataset.tradeView; state.expanded = false; state.submarineExpanded = false; state.guideExpanded = false; render(); });
+  document.querySelector('#guide-toggle').onclick = () => { state.page = 'guide'; state.guideView = 'basic'; state.selectedMaterial = null; state.guideExpanded = true; state.expanded = false; state.submarineExpanded = false; render(); };
+  document.querySelector('#trade-market-popover').addEventListener('mouseenter', () => clearTimeout(tradePopoverHideTimer));
+  document.querySelector('#trade-market-popover').addEventListener('mouseleave', () => hideTradeMarketPopover(true));
+  window.addEventListener('resize', positionTradeMarketPopover);
+  document.addEventListener('scroll', () => { if (activeTradePopover) hideTradeMarketPopover(); }, true);
+  document.addEventListener('click', event => { if (!event.target.closest('#trade-context-menu')) hideTradeContextMenu(); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') hideTradeContextMenu(); });
   function render() {
     document.querySelectorAll('.view').forEach(view => view.classList.toggle('active', view.id === state.page));
     document.querySelectorAll('.app-primary-nav button[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === state.page));
-    const equipmentOpen = state.page === 'equipment', submarineOpen = state.page === 'submarine', guideOpen = state.page === 'guide';
+    const equipmentOpen = state.page === 'equipment', submarineOpen = state.page === 'submarine', guideOpen = state.page === 'guide', tradeOpen = state.page === 'trade';
     document.querySelector('#equipment-toggle').classList.toggle('active', equipmentOpen);
     document.querySelector('#equipment-toggle').setAttribute('aria-expanded', String(equipmentOpen));
     document.querySelector('#equipment-toggle .nav-caret').textContent = equipmentOpen ? '⌃' : '⌄';
@@ -2853,11 +4042,14 @@ window.addEventListener('load', async () => {
     document.querySelector('#guide-toggle').classList.toggle('active', guideOpen);
     document.querySelector('#guide-toggle').setAttribute('aria-expanded', String(guideOpen));
     document.querySelector('#guide-toggle .nav-caret').textContent = guideOpen ? '⌃' : '⌄';
-    document.querySelector('#guide-subnav').classList.toggle('open', guideOpen);
-    document.querySelectorAll('[data-guide]').forEach(button => button.classList.toggle('active', state.page === 'guide' && button.dataset.guide === state.guideView));
+    document.querySelector('.app-contextbar').classList.toggle('has-open-nav', equipmentOpen || submarineOpen || tradeOpen);
+    document.querySelector('#trade-subnav').classList.toggle('open', tradeOpen);
+    document.querySelectorAll('[data-trade-view]').forEach(button => button.classList.toggle('active', state.page === 'trade' && button.dataset.tradeView === state.tradeView));
     if (state.page === 'home') renderHome();
     else if (state.page === 'equipment') renderEquipment();
     else if (state.page === 'submarine') renderSubmarine();
+    else if (state.page === 'leve') renderLeve();
+    else if (state.page === 'trade') renderTrade();
     else if (state.page === 'guide') renderGuide();
   }
   if (migrateLegacyInventories()) save();

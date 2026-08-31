@@ -32,8 +32,8 @@ const collectables = craftScripCatalog.map(([itemId, name, job, level]) => {
 
 window.FF14_CRAFT_SCRIPS = {
   schema: 2,
-  version: '0.0.6',
-  publishedAt: '2026-08-29T00:00:00.000Z',
+  version: '0.0.7',
+  publishedAt: '2026-08-29T01:00:00.000Z',
   sources: {
     huijiCollectables: 'https://ff14.huijiwiki.com/wiki/%E6%94%B6%E8%97%8F%E5%93%81',
     orange: 'https://ff14.huijiwiki.com/wiki/%E5%B7%A7%E6%89%8B%E6%A9%99%E7%A5%A8',
@@ -45,14 +45,29 @@ window.FF14_CRAFT_SCRIPS = {
     purple: { label: '巧手紫票', accent: 'purple', minimumCollectableLevel: 90, scope: '90 级及以上常规收藏品' }
   },
   exchanges: [
+    // 灰机“巧手橙票”当前的素材／消耗品兑换项；不收录装备、家具与魔晶石。
+    ...[
+      ['44170', '无尾鸡', 10], ['44171', '棕豆蔻', 10], ['44172', '野咖啡豆', 10], ['44173', '脐橙', 10], ['44174', '帝王龙虾', 10],
+      ['45990', '木薯', 10], ['45991', '最高级马黛茶', 10], ['45992', '黄风铃椒', 10], ['45993', '新鲜奶酪', 10], ['45994', '鬃背兽里脊肉', 10],
+      ['49229', '燧石玉米', 15], ['49230', '图拉尔梅', 15], ['49231', '犎牛奶', 15]
+    ].map(([itemId, name, ticketCost]) => ({
+      itemId, name, ticket: 'orange', ticketCost, outputQuantity: 1, category: '素材／消耗品',
+      source: '巧手橙票兑换（100级或更高·素材·房屋相关）', sourceUrl: 'https://ff14.huijiwiki.com/wiki/%E5%B7%A7%E6%89%8B%E6%A9%99%E7%A5%A8', verified: true
+    })),
     {
-      itemId: '44848', ticket: 'orange', ticketCost: 125, outputQuantity: 1,
+      itemId: '44848', name: '高浓缩炼金药', ticket: 'orange', ticketCost: 125, outputQuantity: 1, category: '素材／消耗品',
       source: '巧手橙票兑换（100级或更高·素材·房屋相关）',
       sourceUrl: 'https://ff14.huijiwiki.com/wiki/%E7%89%A9%E5%93%81%3A%E9%AB%98%E6%B5%93%E7%BC%A9%E7%82%BC%E9%87%91%E8%8D%AF',
       scope: '当前 770／750 装备配方实际引用时才进入装备推荐材料', verified: true
     },
+    ...[
+      ['21089', '秘制高汤', 10], ['36100', '巨型南瓜', 10]
+    ].map(([itemId, name, ticketCost]) => ({
+      itemId, name, ticket: 'purple', ticketCost, outputQuantity: 1, category: '素材／消耗品',
+      source: '巧手紫票兑换（素材／消耗品）', sourceUrl: 'https://ff14.huijiwiki.com/wiki/%E5%B7%A7%E6%89%8B%E7%B4%AB%E7%A5%A8', verified: true
+    })),
     {
-      itemId: '46252', ticket: 'purple', ticketCost: 500, outputQuantity: 1,
+      itemId: '46252', name: '石匠研磨剂', ticket: 'purple', ticketCost: 500, outputQuantity: 1, category: '素材／消耗品',
       source: '巧手紫票兑换（90级或更高·素材）',
       sourceUrl: 'https://ff14.huijiwiki.com/wiki/%E7%89%A9%E5%93%81%3A%E7%9F%B3%E5%8C%A0%E7%A0%94%E7%A3%A8%E5%89%82',
       scope: '当前 770／750 装备配方实际引用时才进入装备推荐材料', verified: true

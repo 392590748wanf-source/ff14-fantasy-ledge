@@ -39,7 +39,7 @@ await execute(presetSandbox, 'nbb-preset.js');
 if (!presetSandbox.nbbData) throw new Error('无法读取 nbb-preset.js 中的内置装备数据。');
 
 const sandbox = createSandbox();
-for (const file of ['base-materials.js', 'submarine-data.js', 'hqhelper-fallback.js', 'retainer-data.js', 'material-sources.js', 'craft-scrip-data.js', 'craft-scrips.js']) {
+for (const file of ['base-materials.js', 'submarine-data.js', 'hqhelper-fallback.js', 'retainer-data.js', 'material-sources.js', 'craft-scrip-data.js', 'craft-scrips.js', 'levequests.js', 'levequest-recipes.js', 'levequest-material-sources.js']) {
   await execute(sandbox, file);
 }
 
@@ -96,6 +96,19 @@ const craftScripAudit = () => {
   };
 };
 
+const levequestSourceAudit = () => {
+  const sourceData = sandbox.window.FF14_LEVEQUEST_MATERIAL_SOURCES || { items: {}, audit: {} };
+  return {
+    ...sourceData.audit,
+    sources: sourceData.sources || {},
+    materials: Object.entries(sourceData.items || {}).map(([uid, source]) => ({
+      uid: Number(uid), name: source.n || `物品 ${uid}`, status: source.status || '待核验',
+      categories: source.kinds || [], npc: source.npc || null,
+      sourceUrl: source.sourceUrl || '', evidence: source.evidence || {}
+    }))
+  };
+};
+
 const bundle = {
   schema: 1,
   version: version.version,
@@ -109,7 +122,10 @@ const bundle = {
     materialSources: sandbox.window.FF14_MATERIAL_SOURCES,
     exchangeSources: sandbox.window.FF14_EXCHANGE_SOURCES,
     craftScrips: sandbox.window.FF14_CRAFT_SCRIPS,
-    materialSourceAudit: { equipment: equipmentSourceAudit(), craftScrips: craftScripAudit() }
+    levequests: sandbox.window.FF14_LEVEQUESTS,
+    levequestRecipes: sandbox.window.FF14_LEVEQUEST_RECIPES,
+    levequestMaterialSources: sandbox.window.FF14_LEVEQUEST_MATERIAL_SOURCES,
+    materialSourceAudit: { equipment: equipmentSourceAudit(), craftScrips: craftScripAudit(), levequests: levequestSourceAudit() }
   }
 };
 const bundleText = json(bundle);
