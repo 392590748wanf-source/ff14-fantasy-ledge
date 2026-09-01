@@ -3341,13 +3341,14 @@ window.addEventListener('load', async () => {
     const gainBeforeLevel90 = experience => {
       let remaining = Math.max(0, Number(experience || 0)), received = 0;
       while (remaining > 0 && currentLevel < 90) {
-        const needed = Math.max(0, Number(levelExperience[currentLevel] || 0) - currentLevelExperience);
+        const levelRequirement = Math.max(0, Number(levelExperience[currentLevel] || 0));
+        const needed = Math.max(0, levelRequirement - currentLevelExperience);
         if (!(needed > 0)) { currentLevel += 1; currentLevelExperience = 0; continue; }
         const used = Math.min(remaining, needed);
         currentLevelExperience += used;
         remaining -= used;
         received += used;
-        if (currentLevelExperience >= needed) { currentLevel += 1; currentLevelExperience = 0; }
+        if (currentLevelExperience >= levelRequirement) { currentLevel += 1; currentLevelExperience = 0; }
       }
       return { received, overflow: remaining };
     };
