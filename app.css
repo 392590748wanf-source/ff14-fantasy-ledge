@@ -404,5 +404,6 @@ dialog::backdrop, #bundle-detail-dialog::backdrop { background: #00000024; }
 @media (max-width:1100px) { .leve-plan-edit-layout { grid-template-columns:1fr; }.leve-plan-list { max-height:330px; } }
 .leve-ledger td { vertical-align:middle; }
 .leve-ledger small { color:var(--muted); white-space:normal; }
+.leve-90-marker { display:inline-block; margin-left:7px; padding:2px 6px; border:1px solid #d59d43; border-radius:10px; background:#fff7e8; color:#9a6516; font-size:11px; font-weight:600; vertical-align:middle; white-space:nowrap; }
 .leve-metric { position:relative; display:inline-block; cursor:help; font-variant-numeric:tabular-nums; }.leve-metric::after { position:absolute; z-index:20; bottom:calc(100% + 7px); left:50%; width:max-content; max-width:260px; padding:7px 9px; border-radius:6px; background:#25343a; color:#fff; content:attr(data-tooltip); font-size:12px; font-weight:400; line-height:1.45; opacity:0; pointer-events:none; transform:translate(-50%,4px); transition:opacity .12s ease,transform .12s ease; white-space:normal; }.leve-metric:hover::after,.leve-metric:focus::after { opacity:1; transform:translate(-50%,0); }
 @media (max-width: 700px) { .leve-controls { display:grid; grid-template-columns:1fr 1fr; } .leve-controls select,.leve-controls input[type="number"] { min-width:0; width:100%; } }

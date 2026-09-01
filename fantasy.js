@@ -406,19 +406,12 @@ window.addEventListener('load', async () => {
       .catch(() => {})
       .finally(() => state.garlandIconLoading.delete(key));
   };
-  const levequestNbbIconPath = uid => {
-    const id = String(uid || '');
-    return /^\d+$/.test(id) ? `assets/levequest-icons/${id}.png` : '';
-  };
-  // Garland Tools 的图标编号由物品资料接口提供；理符 HQ 交付物则使用
-  // NBB 导出的原始物品图，不再在客户端额外叠加亮点。
+  // 理符交付物统一直接使用已核验的 Garland 图标。此前先尝试本地 NBB 图、
+  // 再回退网络图，会在编辑额度导致整表重绘时反复闪烁。
   const itemIconMarkup = (uid, options = {}) => {
     if (options.hq) {
-      const nbbIcon = levequestNbbIconPath(uid);
-      const fallbackIcon = itemIconId(uid);
-      const fallback = fallbackIcon ? `https://www.garlandtools.org/files/icons/item/${fallbackIcon}.png` : '';
-      if (nbbIcon) return `<img class="item-icon levequest-item-icon" src="${nbbIcon}" alt="" aria-hidden="true" loading="lazy" decoding="async" onerror="${fallback ? `this.onerror=null;this.src='${fallback}'` : 'this.remove()'}">`;
-      return fallback ? `<img class="item-icon" src="${fallback}" alt="" aria-hidden="true" loading="lazy" decoding="async" onerror="this.remove()">` : '';
+      const iconId = itemIconId(uid);
+      return iconId ? `<img class="item-icon levequest-item-icon" src="https://www.garlandtools.org/files/icons/item/${iconId}.png" alt="" aria-hidden="true" loading="lazy" decoding="async" onerror="this.remove()">` : '';
     }
     const iconId = itemIconId(uid);
     if (!iconId) return '';
@@ -3344,53 +3337,68 @@ window.addEventListener('load', async () => {
   const leveExperiencePlan = (routes, start, target, multiplier) => {
     const levelExperience = levequests.levelExperience || [];
     const requiredExperience = levelExperience.slice(start, target).reduce((sum, value) => sum + Number(value || 0), 0);
-    let currentLevel = start, currentLevelExperience = 0, plannedExperience = 0;
-    const advanceLevel = experience => {
-      let remaining = Number(experience || 0);
-      while (remaining > 0 && currentLevel < target) {
+    let currentLevel = start, currentLevelExperience = 0, plannedExperience = 0, theoreticalExperience = 0, lostExperience = 0;
+    const gainBeforeLevel90 = experience => {
+      let remaining = Math.max(0, Number(experience || 0)), received = 0;
+      while (remaining > 0 && currentLevel < 90) {
         const needed = Math.max(0, Number(levelExperience[currentLevel] || 0) - currentLevelExperience);
         if (!(needed > 0)) { currentLevel += 1; currentLevelExperience = 0; continue; }
         const used = Math.min(remaining, needed);
         currentLevelExperience += used;
         remaining -= used;
+        received += used;
         if (currentLevelExperience >= needed) { currentLevel += 1; currentLevelExperience = 0; }
       }
+      return { received, overflow: remaining };
     };
-    // 7.0 规则：80 级以下理符始终按原经验计算；角色达到 90 级后，90 以下理符不再提供经验。
-    const routeHasExperienceAtLevel = row => currentLevel < 90 || Number(row.level) >= 90;
     const rows = routes.map(row => {
-      const originalAllowances = Math.max(0, Number(row.routeAllowances || 0));
+      const allowances = Math.max(0, Number(row.routeAllowances || 0));
       const submissions = Math.max(1, Number(row.submissionsPerAllowance || 1));
       const experiencePerSubmission = Math.max(0, Number(row.experiencePerSubmission || 0));
       const experiencePerAllowance = experiencePerSubmission * submissions * multiplier;
-      let allowances = 0, blockedAtLevel = null;
-      // 方案一的额度直接来自已提供的常规／双倍表；这里只模拟经验与 90 级失效规则，不再按目标经验收缩额度。
-      while (allowances < originalAllowances) {
-        if (!(experiencePerAllowance > 0)) break;
-        if (!routeHasExperienceAtLevel(row)) { blockedAtLevel = currentLevel; break; }
-        allowances += 1;
-        plannedExperience += experiencePerAllowance;
-        advanceLevel(experiencePerAllowance);
+      const routeTheoreticalExperience = allowances * experiencePerAllowance;
+      let routeExperience = routeTheoreticalExperience, routeLostExperience = 0, reachesLevel90 = false, reachesLevel90Allowance = null;
+      // 额度、交付物与成本始终固定；只有低于 90 级的理符经验会在升到 90 时停止。
+      if (Number(row.level) < 90) {
+        routeExperience = 0;
+        for (let allowance = 1; allowance <= allowances; allowance += 1) {
+          if (currentLevel >= 90) { routeLostExperience += experiencePerAllowance; continue; }
+          const beforeLevel = currentLevel;
+          const gain = gainBeforeLevel90(experiencePerAllowance);
+          routeExperience += gain.received;
+          routeLostExperience += gain.overflow;
+          if (beforeLevel < 90 && currentLevel >= 90) {
+            reachesLevel90 = true;
+            reachesLevel90Allowance = allowance;
+          }
+        }
       }
+      theoreticalExperience += routeTheoreticalExperience;
+      plannedExperience += routeExperience;
+      lostExperience += routeLostExperience;
       return {
         ...row,
-        originalAllowances,
         submissions,
         experiencePerSubmission,
         experiencePerAllowance,
         plannedAllowances: allowances,
         plannedQuantity: allowances * submissions,
-        plannedExperience: allowances * experiencePerAllowance,
-        blockedAtLevel
+        plannedExperience: routeExperience,
+        theoreticalExperience: routeTheoreticalExperience,
+        lostExperience: routeLostExperience,
+        reachesLevel90,
+        reachesLevel90Allowance
       };
     });
     return {
       rows,
       requiredExperience,
       plannedExperience,
+      theoreticalExperience,
+      lostExperience,
       overflowExperience: Math.max(0, plannedExperience - requiredExperience),
       shortfallExperience: Math.max(0, requiredExperience - plannedExperience),
-      endingLevel: currentLevel
+      endingLevel: start
     };
   };
   function renderLeve() {
@@ -3399,7 +3407,7 @@ window.addEventListener('load', async () => {
     const validRange = Number.isInteger(start) && Number.isInteger(target) && start >= leveGuideStartLevel && target <= 100 && target > start;
     const routes = validRange ? leveRouteRows() : [];
     const serverMultiplier = state.leveDouble ? 2 : 1, hqMultiplier = 2, multiplier = hqMultiplier * serverMultiplier;
-    const plan = validRange ? leveExperiencePlan(routes, start, target, multiplier) : { rows: [], requiredExperience: 0, plannedExperience: 0, overflowExperience: 0, shortfallExperience: 0, endingLevel: start };
+    const plan = validRange ? leveExperiencePlan(routes, start, target, multiplier) : { rows: [], requiredExperience: 0, plannedExperience: 0, theoreticalExperience: 0, lostExperience: 0, overflowExperience: 0, shortfallExperience: 0, endingLevel: start };
     const summary = plan.rows.reduce((total, row) => {
       const cost = leveRecipeCost(row), quantity = Number(row.plannedQuantity || 0);
       total.allowances += Number(row.plannedAllowances || 0);
@@ -3411,26 +3419,31 @@ window.addEventListener('load', async () => {
     }, { allowances: 0, quantity: 0, cost: 0, pending: 0, unverified: 0 });
     const rows = plan.rows.map((row, index) => {
       const material = leveKnownMaterial(row), cost = leveRecipeCost(row), submissions = Number(row.submissions || 1), xp = Number(row.experiencePerSubmission || 0);
-      const allowances = Number(row.plannedAllowances || 0), originalAllowances = Number(row.originalAllowances || 0);
+      const allowances = Number(row.plannedAllowances || 0);
       const factors = [moneyFormatter.format(xp), submissions, allowances, 'HQ 2', ...(state.leveDouble ? ['服务器 2'] : [])];
       const itemLabel = material ? itemLabelMarkup(material.uid, row.item, { hq: true }) : `${row.item} <span class="meta">（待核验物品 ID）</span>`;
       const plannedQuantity = Number(row.plannedQuantity || 0);
       const totalCost = cost.unit * plannedQuantity;
       const costFormula = `单件当前成本 ${money(cost.unit)} × 物品数量 ${plannedQuantity} = ${money(totalCost)}`;
-      const experienceFormula = `${factors.join(' × ')} = ${moneyFormatter.format(row.plannedExperience)}`;
+      const baseExperienceFormula = `${factors.join(' × ')} = ${moneyFormatter.format(row.theoreticalExperience)}`;
+      const experienceFormula = row.reachesLevel90
+        ? `${baseExperienceFormula}；第 ${row.reachesLevel90Allowance} 额度达到 90 级，实际获得 ${moneyFormatter.format(row.plannedExperience)}，溢出 ${moneyFormatter.format(row.lostExperience)}`
+        : row.lostExperience > 0
+          ? `${baseExperienceFormula}；已达到 90 级，实际获得 ${moneyFormatter.format(row.plannedExperience)}，不再获得 ${moneyFormatter.format(row.lostExperience)}`
+          : baseExperienceFormula;
       const costLabel = allowances > 0
         ? cost.unit > 0 ? `<span class="leve-metric" tabindex="0" data-tooltip="${costFormula}">${money(totalCost)}</span>` : cost.reason
         : '—';
       const experience = !(xp > 0) ? '等待任务匹配' : allowances > 0
-        ? `<span class="leve-metric" tabindex="0" data-tooltip="${experienceFormula}">${moneyFormatter.format(row.plannedExperience)}</span>`
-        : `当前模拟等级 ${row.blockedAtLevel}：任务等级 ${row.level} 无经验`;
-      return `<tr><td>${row.level}</td><td class="label"><b>${row.quest}</b></td><td class="label">${material ? `<button class="bundle-link" data-leve-detail="${material.uid}">${itemLabel}</button>` : itemLabel}</td><td>${plannedQuantity}</td><td>${allowances}</td><td>${experience}</td><td>${costLabel}</td><td class="label">${row.place || '待补充地点'}${row.note ? `<br><small>${row.note}</small>` : ''}</td></tr>`;
+        ? `<span class="leve-metric" tabindex="0" data-tooltip="${experienceFormula}">${moneyFormatter.format(row.plannedExperience)}</span>` : '—';
+      return `<tr><td>${row.level}</td><td class="label"><b>${row.quest}</b>${row.reachesLevel90 ? '<span class="leve-90-marker">达到90级</span>' : ''}</td><td class="label">${material ? `<button class="bundle-link" data-leve-detail="${material.uid}">${itemLabel}</button>` : itemLabel}</td><td>${plannedQuantity}</td><td>${allowances}</td><td>${experience}</td><td>${costLabel}</td><td class="label">${row.place || '待补充地点'}${row.note ? `<br><small>${row.note}</small>` : ''}</td></tr>`;
     }).join('');
     const root = document.querySelector('#leve');
     const experienceStatus = plan.shortfallExperience > 0
       ? `额度不足 ${moneyFormatter.format(plan.shortfallExperience)} 经验`
       : plan.overflowExperience > 0 ? `预计溢出 ${moneyFormatter.format(plan.overflowExperience)} 经验` : '刚好满足目标经验';
-    root.innerHTML = `<div class="header"><div><div class="meta">理符售卖 · 生产职业升级规划</div><h1>理符升级推荐</h1><div class="sub">方案一严格依据 7.0 制作理符攻略：服务器双倍开启时使用对应的双倍经验表。成本直接使用材料库的最新参考价，全部按高品质交付计算。</div></div></div><section class="leve-controls"><label>职业<select id="leve-job">${(levequests.jobs || []).map(job => `<option value="${job}" ${job === state.leveJob ? 'selected' : ''}>${job}</option>`).join('')}</select></label><label>当前等级<input id="leve-start" type="number" min="20" max="99" step="1" value="${start}"></label><label>目标等级<input id="leve-target" type="number" min="21" max="100" step="1" value="${target}"></label><label class="leve-double"><input id="leve-double" type="checkbox" ${state.leveDouble ? 'checked' : ''}>服务器双倍经验</label></section>${validRange ? '' : '<p class="status">攻略范围为 20–100 级，目标等级必须高于当前等级。</p>'}<div class="cards leve-summary"><article class="card"><small>升级所需经验</small><b>${moneyFormatter.format(plan.requiredExperience)}</b><div class="meta">${start} → ${target} 级</div></article><article class="card"><small>计划理符额度</small><b>${summary.allowances}</b><div class="meta">按所选方案表</div></article><article class="card"><small>计划交付物总数</small><b>${summary.quantity}</b></article><article class="card"><small>计划获得经验</small><b>${moneyFormatter.format(plan.plannedExperience)}</b><div class="meta">${experienceStatus} · HQ ×2${state.leveDouble ? ' · 服务器 ×2' : ''}${summary.unverified ? ` · ${summary.unverified} 项等待核验` : ''}</div></article><article class="card"><small>预计交付成本</small><b>${summary.pending ? '等待补价' : money(summary.cost)}</b><div class="meta">${summary.pending ? `${summary.pending} 项等待补价，未计入总计` : '递归计算'}</div></article></div><div class="table-wrap"><table class="ledger leve-ledger"><thead><tr><th>等级</th><th>理符任务</th><th>所需道具</th><th>物品数量</th><th>理符额度</th><th>经验</th><th>当前成本</th><th>接取地点</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="empty">${validRange ? '该等级范围暂无已导入路线。' : '请先填写有效等级范围。'}</td></tr>`}</tbody></table></div>`;
+    const experienceLossStatus = plan.lostExperience > 0 ? `· 达到90级失效 ${moneyFormatter.format(plan.lostExperience)} 经验` : '';
+    root.innerHTML = `<div class="header"><div><div class="meta">理符售卖 · 生产职业升级规划</div><h1>理符升级推荐</h1><div class="sub">方案一严格依据 7.0 制作理符攻略：服务器双倍开启时使用对应的双倍经验表。成本直接使用材料库的最新参考价，全部按高品质交付计算。</div></div></div><section class="leve-controls"><label>职业<select id="leve-job">${(levequests.jobs || []).map(job => `<option value="${job}" ${job === state.leveJob ? 'selected' : ''}>${job}</option>`).join('')}</select></label><label>当前等级<input id="leve-start" type="number" min="20" max="99" step="1" value="${start}"></label><label>目标等级<input id="leve-target" type="number" min="21" max="100" step="1" value="${target}"></label><label class="leve-double"><input id="leve-double" type="checkbox" ${state.leveDouble ? 'checked' : ''}>服务器双倍经验</label></section>${validRange ? '' : '<p class="status">攻略范围为 20–100 级，目标等级必须高于当前等级。</p>'}<div class="cards leve-summary"><article class="card"><small>升级所需经验</small><b>${moneyFormatter.format(plan.requiredExperience)}</b><div class="meta">${start} → ${target} 级</div></article><article class="card"><small>计划理符额度</small><b>${summary.allowances}</b><div class="meta">按所选方案表</div></article><article class="card"><small>计划交付物总数</small><b>${summary.quantity}</b></article><article class="card"><small>计划获得经验</small><b>${moneyFormatter.format(plan.plannedExperience)}</b><div class="meta">理论 ${moneyFormatter.format(plan.theoreticalExperience)} · ${experienceStatus} ${experienceLossStatus} · HQ ×2${state.leveDouble ? ' · 服务器 ×2' : ''}${summary.unverified ? ` · ${summary.unverified} 项等待核验` : ''}</div></article><article class="card"><small>预计交付成本</small><b>${summary.pending ? '等待补价' : money(summary.cost)}</b><div class="meta">${summary.pending ? `${summary.pending} 项等待补价，未计入总计` : '递归计算'}</div></article></div><div class="table-wrap"><table class="ledger leve-ledger"><thead><tr><th>等级</th><th>理符任务</th><th>所需道具</th><th>物品数量</th><th>理符额度</th><th>经验</th><th>当前成本</th><th>接取地点</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="empty">${validRange ? '该等级范围暂无已导入路线。' : '请先填写有效等级范围。'}</td></tr>`}</tbody></table></div>`;
     // 完整生产理符库与当前方案分离：系统方案可恢复，自定义方案只保存在本机。
     root.querySelector('#leve-start').min = '1';
     root.querySelector('#leve-target').min = '2';
