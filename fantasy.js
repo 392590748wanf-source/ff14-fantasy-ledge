@@ -3337,10 +3337,10 @@ window.addEventListener('load', async () => {
   const leveExperiencePlan = (routes, start, target, multiplier) => {
     const levelExperience = levequests.levelExperience || [];
     const requiredExperience = levelExperience.slice(start, target).reduce((sum, value) => sum + Number(value || 0), 0);
-    let currentLevel = start, currentLevelExperience = 0, plannedExperience = 0, theoreticalExperience = 0, lostExperience = 0;
-    const gainBeforeLevel90 = experience => {
+    let currentLevel = start, currentLevelExperience = 0, plannedExperience = 0, theoreticalExperience = 0, level90LostExperience = 0, targetOverflowExperience = 0;
+    const gainUntilLevel = (experience, stopLevel) => {
       let remaining = Math.max(0, Number(experience || 0)), received = 0;
-      while (remaining > 0 && currentLevel < 90) {
+      while (remaining > 0 && currentLevel < stopLevel) {
         const levelRequirement = Math.max(0, Number(levelExperience[currentLevel] || 0));
         const needed = Math.max(0, levelRequirement - currentLevelExperience);
         if (!(needed > 0)) { currentLevel += 1; currentLevelExperience = 0; continue; }
@@ -3358,25 +3358,40 @@ window.addEventListener('load', async () => {
       const experiencePerSubmission = Math.max(0, Number(row.experiencePerSubmission || 0));
       const experiencePerAllowance = experiencePerSubmission * submissions * multiplier;
       const routeTheoreticalExperience = allowances * experiencePerAllowance;
-      let routeExperience = routeTheoreticalExperience, routeLostExperience = 0, reachesLevel90 = false, reachesLevel90Allowance = null;
+      let routeExperience = routeTheoreticalExperience, routeLevel90LostExperience = 0, routeTargetOverflowExperience = 0;
+      let reachesLevel90 = false, reachesLevel90Allowance = null, reachesLevel100 = false, reachesLevel100Allowance = null;
       // 额度、交付物与成本始终固定；只有低于 90 级的理符经验会在升到 90 时停止。
       if (Number(row.level) < 90) {
         routeExperience = 0;
         for (let allowance = 1; allowance <= allowances; allowance += 1) {
-          if (currentLevel >= 90) { routeLostExperience += experiencePerAllowance; continue; }
+          if (currentLevel >= 90) { routeLevel90LostExperience += experiencePerAllowance; continue; }
           const beforeLevel = currentLevel;
-          const gain = gainBeforeLevel90(experiencePerAllowance);
+          const gain = gainUntilLevel(experiencePerAllowance, 90);
           routeExperience += gain.received;
-          routeLostExperience += gain.overflow;
+          routeLevel90LostExperience += gain.overflow;
           if (beforeLevel < 90 && currentLevel >= 90) {
             reachesLevel90 = true;
             reachesLevel90Allowance = allowance;
           }
         }
+      } else if (target === 100) {
+        routeExperience = 0;
+        for (let allowance = 1; allowance <= allowances; allowance += 1) {
+          if (currentLevel >= 100) { routeTargetOverflowExperience += experiencePerAllowance; continue; }
+          const beforeLevel = currentLevel;
+          const gain = gainUntilLevel(experiencePerAllowance, 100);
+          routeExperience += gain.received;
+          routeTargetOverflowExperience += gain.overflow;
+          if (beforeLevel < 100 && currentLevel >= 100) {
+            reachesLevel100 = true;
+            reachesLevel100Allowance = allowance;
+          }
+        }
       }
       theoreticalExperience += routeTheoreticalExperience;
       plannedExperience += routeExperience;
-      lostExperience += routeLostExperience;
+      level90LostExperience += routeLevel90LostExperience;
+      targetOverflowExperience += routeTargetOverflowExperience;
       return {
         ...row,
         submissions,
@@ -3386,9 +3401,12 @@ window.addEventListener('load', async () => {
         plannedQuantity: allowances * submissions,
         plannedExperience: routeExperience,
         theoreticalExperience: routeTheoreticalExperience,
-        lostExperience: routeLostExperience,
+        level90LostExperience: routeLevel90LostExperience,
+        targetOverflowExperience: routeTargetOverflowExperience,
         reachesLevel90,
-        reachesLevel90Allowance
+        reachesLevel90Allowance,
+        reachesLevel100,
+        reachesLevel100Allowance
       };
     });
     return {
@@ -3396,8 +3414,10 @@ window.addEventListener('load', async () => {
       requiredExperience,
       plannedExperience,
       theoreticalExperience,
-      lostExperience,
-      overflowExperience: Math.max(0, plannedExperience - requiredExperience),
+      level90LostExperience,
+      targetOverflowExperience,
+      lostExperience: level90LostExperience + targetOverflowExperience,
+      overflowExperience: targetOverflowExperience,
       shortfallExperience: Math.max(0, requiredExperience - plannedExperience),
       endingLevel: start
     };
@@ -3428,23 +3448,30 @@ window.addEventListener('load', async () => {
       const costFormula = `单件当前成本 ${money(cost.unit)} × 物品数量 ${plannedQuantity} = ${money(totalCost)}`;
       const baseExperienceFormula = `${factors.join(' × ')} = ${moneyFormatter.format(row.theoreticalExperience)}`;
       const experienceFormula = row.reachesLevel90
-        ? `${baseExperienceFormula}；第 ${row.reachesLevel90Allowance} 额度达到 90 级，实际获得 ${moneyFormatter.format(row.plannedExperience)}，溢出 ${moneyFormatter.format(row.lostExperience)}`
-        : row.lostExperience > 0
-          ? `${baseExperienceFormula}；已达到 90 级，实际获得 ${moneyFormatter.format(row.plannedExperience)}，不再获得 ${moneyFormatter.format(row.lostExperience)}`
-          : baseExperienceFormula;
+        ? `${baseExperienceFormula}；第 ${row.reachesLevel90Allowance} 额度达到 90 级，实际获得 ${moneyFormatter.format(row.plannedExperience)}，90级失效 ${moneyFormatter.format(row.level90LostExperience)}`
+        : row.reachesLevel100
+          ? `${baseExperienceFormula}；第 ${row.reachesLevel100Allowance} 额度达到 100 级，实际获得 ${moneyFormatter.format(row.plannedExperience)}，溢出 ${moneyFormatter.format(row.targetOverflowExperience)}`
+          : row.level90LostExperience > 0
+            ? `${baseExperienceFormula}；已达到 90 级，实际获得 ${moneyFormatter.format(row.plannedExperience)}，90级失效 ${moneyFormatter.format(row.level90LostExperience)}`
+            : row.targetOverflowExperience > 0
+              ? `${baseExperienceFormula}；已达到 100 级，实际获得 ${moneyFormatter.format(row.plannedExperience)}，溢出 ${moneyFormatter.format(row.targetOverflowExperience)}`
+              : baseExperienceFormula;
       const costLabel = allowances > 0
         ? cost.unit > 0 ? `<span class="leve-metric" tabindex="0" data-tooltip="${costFormula}">${money(totalCost)}</span>` : cost.reason
         : '—';
       const experience = !(xp > 0) ? '等待任务匹配' : allowances > 0
         ? `<span class="leve-metric" tabindex="0" data-tooltip="${experienceFormula}">${moneyFormatter.format(row.plannedExperience)}</span>` : '—';
-      return `<tr><td>${row.level}</td><td class="label"><b>${row.quest}</b>${row.reachesLevel90 ? '<span class="leve-90-marker">达到90级</span>' : ''}</td><td class="label">${material ? `<button class="bundle-link" data-leve-detail="${material.uid}">${itemLabel}</button>` : itemLabel}</td><td>${plannedQuantity}</td><td>${allowances}</td><td>${experience}</td><td>${costLabel}</td><td class="label">${row.place || '待补充地点'}${row.note ? `<br><small>${row.note}</small>` : ''}</td></tr>`;
+      const levelMarker = row.reachesLevel90 ? '<span class="leve-level-marker">达到90级</span>' : row.reachesLevel100 ? '<span class="leve-level-marker leve-100-marker">达到100级</span>' : '';
+      return `<tr><td>${row.level}</td><td class="label"><b>${row.quest}</b>${levelMarker}</td><td class="label">${material ? `<button class="bundle-link" data-leve-detail="${material.uid}">${itemLabel}</button>` : itemLabel}</td><td>${plannedQuantity}</td><td>${allowances}</td><td>${experience}</td><td>${costLabel}</td><td class="label">${row.place || '待补充地点'}${row.note ? `<br><small>${row.note}</small>` : ''}</td></tr>`;
     }).join('');
     const root = document.querySelector('#leve');
+    const displayOverflowExperience = target === 100 ? plan.targetOverflowExperience : Math.max(0, plan.plannedExperience - plan.requiredExperience);
     const experienceStatus = plan.shortfallExperience > 0
       ? `额度不足 ${moneyFormatter.format(plan.shortfallExperience)} 经验`
-      : plan.overflowExperience > 0 ? `预计溢出 ${moneyFormatter.format(plan.overflowExperience)} 经验` : '刚好满足目标经验';
-    const experienceLossStatus = plan.lostExperience > 0 ? `· 达到90级失效 ${moneyFormatter.format(plan.lostExperience)} 经验` : '';
-    root.innerHTML = `<div class="header"><div><div class="meta">理符售卖 · 生产职业升级规划</div><h1>理符升级推荐</h1><div class="sub">方案一严格依据 7.0 制作理符攻略：服务器双倍开启时使用对应的双倍经验表。成本直接使用材料库的最新参考价，全部按高品质交付计算。</div></div></div><section class="leve-controls"><label>职业<select id="leve-job">${(levequests.jobs || []).map(job => `<option value="${job}" ${job === state.leveJob ? 'selected' : ''}>${job}</option>`).join('')}</select></label><label>当前等级<input id="leve-start" type="number" min="20" max="99" step="1" value="${start}"></label><label>目标等级<input id="leve-target" type="number" min="21" max="100" step="1" value="${target}"></label><label class="leve-double"><input id="leve-double" type="checkbox" ${state.leveDouble ? 'checked' : ''}>服务器双倍经验</label></section>${validRange ? '' : '<p class="status">攻略范围为 20–100 级，目标等级必须高于当前等级。</p>'}<div class="cards leve-summary"><article class="card"><small>升级所需经验</small><b>${moneyFormatter.format(plan.requiredExperience)}</b><div class="meta">${start} → ${target} 级</div></article><article class="card"><small>计划理符额度</small><b>${summary.allowances}</b><div class="meta">按所选方案表</div></article><article class="card"><small>计划交付物总数</small><b>${summary.quantity}</b></article><article class="card"><small>计划获得经验</small><b>${moneyFormatter.format(plan.plannedExperience)}</b><div class="meta">理论 ${moneyFormatter.format(plan.theoreticalExperience)} · ${experienceStatus} ${experienceLossStatus} · HQ ×2${state.leveDouble ? ' · 服务器 ×2' : ''}${summary.unverified ? ` · ${summary.unverified} 项等待核验` : ''}</div></article><article class="card"><small>预计交付成本</small><b>${summary.pending ? '等待补价' : money(summary.cost)}</b><div class="meta">${summary.pending ? `${summary.pending} 项等待补价，未计入总计` : '递归计算'}</div></article></div><div class="table-wrap"><table class="ledger leve-ledger"><thead><tr><th>等级</th><th>理符任务</th><th>所需道具</th><th>物品数量</th><th>理符额度</th><th>经验</th><th>当前成本</th><th>接取地点</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="empty">${validRange ? '该等级范围暂无已导入路线。' : '请先填写有效等级范围。'}</td></tr>`}</tbody></table></div>`;
+      : displayOverflowExperience > 0 ? `达到${target}级，溢出 ${moneyFormatter.format(displayOverflowExperience)} 经验` : '刚好满足目标经验';
+    const level90LossStatus = plan.level90LostExperience > 0 ? `· 90级失效 ${moneyFormatter.format(plan.level90LostExperience)} 经验` : '';
+    const targetOverflowStatus = plan.targetOverflowExperience > 0 ? `其中溢出 ${moneyFormatter.format(plan.targetOverflowExperience)} 经验` : '无溢出经验';
+    root.innerHTML = `<div class="header"><div><div class="meta">理符售卖 · 生产职业升级规划</div><h1>理符升级推荐</h1><div class="sub">方案一严格依据 7.0 制作理符攻略：服务器双倍开启时使用对应的双倍经验表。成本直接使用材料库的最新参考价，全部按高品质交付计算。</div></div></div><section class="leve-controls"><label>职业<select id="leve-job">${(levequests.jobs || []).map(job => `<option value="${job}" ${job === state.leveJob ? 'selected' : ''}>${job}</option>`).join('')}</select></label><label>当前等级<input id="leve-start" type="number" min="20" max="99" step="1" value="${start}"></label><label>目标等级<input id="leve-target" type="number" min="21" max="100" step="1" value="${target}"></label><label class="leve-double"><input id="leve-double" type="checkbox" ${state.leveDouble ? 'checked' : ''}>服务器双倍经验</label></section>${validRange ? '' : '<p class="status">攻略范围为 20–100 级，目标等级必须高于当前等级。</p>'}<div class="cards leve-summary"><article class="card"><small>升级所需经验</small><b>${moneyFormatter.format(plan.requiredExperience)}</b><div class="meta">${start} → ${target} 级</div></article><article class="card"><small>实际获得经验</small><b>${moneyFormatter.format(plan.plannedExperience)}</b><div class="meta">${experienceStatus} ${level90LossStatus} · HQ ×2${state.leveDouble ? ' · 服务器 ×2' : ''}</div></article><article class="card"><small>理论获得经验</small><b>${moneyFormatter.format(plan.theoreticalExperience)}</b><div class="meta">${targetOverflowStatus}${summary.unverified ? ` · ${summary.unverified} 项等待核验` : ''}</div></article><article class="card"><small>计划理符额度</small><b>${summary.allowances}</b><div class="meta">按所选方案表</div></article><article class="card"><small>计划交付物总数</small><b>${summary.quantity}</b></article><article class="card"><small>预计交付成本</small><b>${summary.pending ? '等待补价' : money(summary.cost)}</b><div class="meta">${summary.pending ? `${summary.pending} 项等待补价，未计入总计` : '递归计算'}</div></article></div><div class="table-wrap"><table class="ledger leve-ledger"><thead><tr><th>等级</th><th>理符任务</th><th>所需道具</th><th>物品数量</th><th>理符额度</th><th>经验</th><th>当前成本</th><th>接取地点</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="empty">${validRange ? '该等级范围暂无已导入路线。' : '请先填写有效等级范围。'}</td></tr>`}</tbody></table></div>`;
     // 完整生产理符库与当前方案分离：系统方案可恢复，自定义方案只保存在本机。
     root.querySelector('#leve-start').min = '1';
     root.querySelector('#leve-target').min = '2';
