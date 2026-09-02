@@ -1,6 +1,6 @@
 {
-  "name": "logfate",
-  "productName": "LogFate",
+  "name": "gilfate",
+  "productName": "GilFate",
   "version": "1.1.9",
   "packageManager": "pnpm@11.19.0",
   "description": "FF14 装备与潜水艇成本、库存及销售利润账本",
@@ -17,6 +17,7 @@
     "leves:sources": "node tools/sync-levequest-material-sources.mjs",
     "leves:icons": "node tools/sync-levequest-icons.mjs",
     "icons:sync": "node tools/sync-garland-icons.mjs",
+    "icon:build": "powershell.exe -ExecutionPolicy Bypass -File tools/generate-app-icon.ps1",
     "dist:win": "electron-builder --win nsis --x64 --publish never",
     "release": "pnpm run dist:win"
   },
@@ -29,8 +30,8 @@
   },
   "build": {
     "appId": "com.ff14.fantasy.ledger",
-    "productName": "LogFate",
-    "artifactName": "LogFate-Setup-${version}.${ext}",
+    "productName": "GilFate",
+    "artifactName": "GilFate-Setup-${version}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -56,7 +57,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "LogFate"
+    "shortcutName": "GilFate"
     },
     "publish": [
       {

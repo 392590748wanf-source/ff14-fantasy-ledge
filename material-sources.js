@@ -65,6 +65,8 @@ window.FF14_MATERIAL_SOURCES = {
   '12888': { name: '牦牛奶', tradeCategories: ['combat'], verified: { trade: '战职', sources: ['https://www.garlandtools.org/db/doc/item/en/3/12888.json'] } },
   '36260': { name: '彩蝶鳞粉', tradeCategories: ['combat'], verified: { trade: '战职', sources: ['https://www.garlandtools.org/db/doc/item/en/3/36260.json'], evidence: ['狩猎筹集委托：彩蝶鳞粉', '战斗精英／魔法导师雇员', '怪物掉落', '双色宝石兑换'] } },
   '25008': { name: '铁纹矿石', submarineKinds: ['潜水艇携带材料'] },
+  '26529': { name: '柳杉原木', submarineKinds: ['潜水艇携带材料'] },
+  '26531': { name: '纯钛矿', submarineKinds: ['潜水艇携带材料'] },
   '44070': { name: '小鸣鼠的刃爪', equipmentKinds: ['怪物掉落'] },
   '45972': { name: '洋红虫染料', equipmentKinds: ['限时采集品'], verified: { equipment: '限时采集品', sources: ['https://ff14.huijiwiki.com/wiki/Data%3A%E8%A1%A5%E5%85%85%E6%95%B0%E6%8D%AE/%E9%87%87%E9%9B%86%E7%82%B9.tabx'] } },
   '49212': { name: '园圃软水', equipmentKinds: ['限时采集品'], verified: { equipment: '限时采集品', sources: ['https://ff14.huijiwiki.com/wiki/%E7%89%A9%E5%93%81%3A%E5%9B%AD%E5%9C%83%E8%BD%AF%E6%B0%B4'] } },

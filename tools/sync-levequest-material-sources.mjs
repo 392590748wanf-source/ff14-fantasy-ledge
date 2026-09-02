@@ -6,6 +6,7 @@ import { wikiNpcLocalizations } from './wiki-npc-localizations.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const cacheDir = resolve(root, 'tools', '.cache', 'levequest-recipes');
+const cacheOnly = process.argv.includes('--cached');
 const garlandBase = 'https://www.garlandtools.org/db/doc/item/en/3';
 const chineseNpcDataUrl = 'https://raw.githubusercontent.com/thewakingsands/ffxiv-datamining-cn/master/ENpcResident.csv';
 const evaluate = async file => {
@@ -20,6 +21,20 @@ const recipes = recipeData.FF14_LEVEQUEST_RECIPES || {};
 const itemNames = recipes.items || {};
 const materialSourceOverrides = sourceData.FF14_MATERIAL_SOURCES || {};
 const exchanges = sourceData.FF14_EXCHANGE_SOURCES?.routes || [];
+// Garland 的 item 文档不会覆盖部分鱼类、精选素材与后续版本怪物掉落。
+// 此表是按国服 Wiki 物品资料页维护的来源补充，仅在 Garland 缺少来源时启用；
+// 每项保留资料页地址，便于后续重新审计。
+const wikiAcquisitionOverrides = {
+  4881: '常规采集品', 4886: '常规采集品', 4891: '常规采集品', 4892: '常规采集品', 4893: '常规采集品', 4896: '常规采集品', 4898: '常规采集品', 4903: '常规采集品', 4949: '常规采集品', 4958: '常规采集品', 4982: '常规采集品',
+  5261: '常规采集品', 5274: '常规采集品', 5460: '常规采集品', 5462: '常规采集品',
+  12719: '常规采集品', 12736: '常规采集品', 12737: '常规采集品', 12741: '常规采集品', 12758: '常规采集品', 12808: '常规采集品', 12905: '市场采购半成品', 12936: '灵砂', 14143: '常规采集品', 20013: '灵砂',
+  27451: '常规采集品', 27457: '常规采集品', 27511: '常规采集品',
+  27732: '怪物掉落', 27733: '怪物掉落', 27734: '怪物掉落', 27735: '怪物掉落', 27736: '怪物掉落', 27756: '怪物掉落', 27763: '怪物掉落', 27764: '怪物掉落', 27773: '怪物掉落', 27774: '怪物掉落', 27799: '怪物掉落', 27800: '怪物掉落', 27811: '灵砂', 27812: '灵砂', 27850: '怪物掉落', 27852: '怪物掉落',
+  36203: '怪物掉落', 36223: '灵砂', 36242: '怪物掉落', 36243: '怪物掉落', 36244: '怪物掉落', 36245: '怪物掉落', 36246: '怪物掉落', 36253: '怪物掉落', 36254: '怪物掉落', 36255: '怪物掉落', 36256: '怪物掉落', 36257: '怪物掉落', 36258: '怪物掉落', 36260: '怪物掉落', 36261: '怪物掉落', 36262: '限时采集品',
+  43793: '常规采集品',
+  44027: '怪物掉落', 44035: '灵砂', 44053: '怪物掉落', 44054: '怪物掉落', 44055: '怪物掉落', 44056: '怪物掉落', 44057: '怪物掉落', 44063: '怪物掉落', 44064: '怪物掉落', 44065: '怪物掉落', 44066: '怪物掉落', 44067: '怪物掉落', 44068: '怪物掉落', 44069: '怪物掉落', 44070: '怪物掉落', 44071: '怪物掉落', 44072: '怪物掉落'
+};
+const wikiItemUrl = uid => `https://ff14.huijiwiki.com/wiki/Data:Item/${uid}.json`;
 const routes = (catalogData.FF14_LEVEQUEST_CATALOG?.routes || leveData.FF14_LEVEQUESTS?.routes || [])
   .filter(route => route.verified && /^\d+$/.test(String(route.itemId || '')));
 const roots = [...new Set(routes.map(route => String(route.itemId)))];
@@ -73,6 +88,7 @@ const readChineseNpcNames = async () => {
 const chineseNpcNames = await readChineseNpcNames();
 const readGarlandItem = async uid => {
   const file = resolve(cacheDir, `item-${uid}.json`);
+  if (cacheOnly) return JSON.parse(await readFile(file, 'utf8'));
   try {
     const response = await fetch(`${garlandBase}/${uid}.json`, { headers: { 'user-agent': 'LogFate levequest source auditor/1.0' } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -153,7 +169,9 @@ for (let start = 0; start < ids.length; start += 12) {
   for (const [uid, document, error] of imported) {
     const item = document?.item;
     if (!item) { missing.push({ id: Number(uid), reason: error?.message || 'Garland 未返回物品资料' }); continue; }
-    const vendorCount = Number(item.vendors?.length || 0), price = Number(item.price || 0), kinds = sourceKinds(item, uid);
+    const vendorCount = Number(item.vendors?.length || 0), price = Number(item.price || 0);
+    const wikiKind = wikiAcquisitionOverrides[uid];
+    const kinds = [...new Set([...sourceKinds(item, uid), ...(wikiKind ? [wikiKind] : [])])];
     const vendor = vendorSummary(document, item);
     for (const entry of vendor.vendors) {
       if (!entry.localizedName) unmatchedVendors.set(String(entry.id), { id: entry.id, garlandName: entry.name, fallback: vendorTypeLabels[entry.type] || vendorNameLabel(entry.name) });
@@ -163,9 +181,9 @@ for (let start = 0; start < ids.length; start += 12) {
       n: itemNames[uid]?.n || item.name || `物品 ${uid}`,
       kinds,
       npc: price > 0 && vendorCount > 0 ? { price, source: overrideNpc?.source || vendor.summary, vendorCount, vendors: vendor.vendors } : null,
-      sourceUrl: `${garlandBase}/${uid}.json`,
+      sourceUrl: wikiKind ? wikiItemUrl(uid) : `${garlandBase}/${uid}.json`,
       status: kinds.length ? '已核验' : '待核验',
-      evidence: { vendors: vendorCount, nodes: Number(item.nodes?.length || 0), drops: Number(item.drops?.length || 0), craft: Number(item.craft?.length || 0), exchangeKinds: exchangeKindsFor(uid) }
+      evidence: { vendors: vendorCount, nodes: Number(item.nodes?.length || 0), drops: Number(item.drops?.length || 0), craft: Number(item.craft?.length || 0), exchangeKinds: exchangeKindsFor(uid), wikiKind: wikiKind || null }
     };
   }
 }

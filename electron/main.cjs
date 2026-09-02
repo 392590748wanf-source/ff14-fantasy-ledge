@@ -157,7 +157,7 @@ const createWindow = () => {
     minWidth: 1080,
     minHeight: 700,
     show: false,
-    title: `LogFate · v${app.getVersion()}`,
+    title: `GilFate · v${app.getVersion()}`,
     icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -201,9 +201,9 @@ ipcMain.handle('backup:export', async (_event, rawBackup) => {
   const backup = normalizeBackup(rawBackup);
   const date = new Date().toISOString().slice(0, 10);
   const result = await dialog.showSaveDialog(mainWindow, {
-    title: '导出 LogFate 账本备份',
-    defaultPath: `logfate-backup-${date}.json`,
-    filters: [{ name: 'LogFate 备份', extensions: ['json'] }]
+    title: '导出 GilFate 账本备份',
+    defaultPath: `gilfate-backup-${date}.json`,
+    filters: [{ name: 'GilFate 备份', extensions: ['json'] }]
   });
   if (result.canceled || !result.filePath) return { canceled: true };
   await fs.writeFile(result.filePath, JSON.stringify(backup, null, 2), 'utf8');
@@ -212,9 +212,9 @@ ipcMain.handle('backup:export', async (_event, rawBackup) => {
 
 ipcMain.handle('backup:import', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: '导入 LogFate 账本备份',
+    title: '导入 GilFate 账本备份',
     properties: ['openFile'],
-    filters: [{ name: 'LogFate 备份', extensions: ['json'] }]
+    filters: [{ name: 'GilFate 备份', extensions: ['json'] }]
   });
   if (result.canceled || !result.filePaths[0]) return { canceled: true };
   try {
